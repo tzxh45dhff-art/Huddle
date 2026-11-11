@@ -1,0 +1,642 @@
+@font-face {
+  font-family: Huddle Pixel;
+  src: url("./pixel.ttf") format("truetype");
+  font-display: swap;
+}
+.sh {
+  height: 100%;
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  background: #1d2844;
+  color: #fff5db;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 700;
+  overflow: auto;
+  --gold: #ffce62;
+}
+.sh * {
+  box-sizing: border-box;
+}
+.sh button {
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.sh button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sh button:focus-visible {
+  outline: 3px solid #fff7bf;
+  outline-offset: 4px;
+}
+.sh-hud {
+  height: 74px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 28px 10px 80px;
+  border-bottom: 4px solid #35435e;
+  background: #1e2c48;
+  position: relative;
+  z-index: 2;
+}
+.sh-hud > div {
+  display: grid;
+  gap: 5px;
+  font-size: 15px;
+  letter-spacing: 1px;
+}
+.sh-hud span {
+  font-size: 10px;
+  color: #a6b6ce;
+}
+.sh-hud b {
+  white-space: nowrap;
+}
+.sh-back,
+.sh-sound {
+  border: 0;
+  background: none;
+  color: #fff1d7;
+  padding: 8px;
+}
+.sh-back {
+  display: none;
+}
+.sh-gold {
+  color: var(--gold);
+}
+.sh-roster {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  padding: 6px 16px;
+  background: #2b3c59;
+  flex-wrap: wrap;
+}
+.sh-roster > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  max-width: 220px;
+}
+.sh-roster svg {
+  height: 26px;
+  width: 24px;
+  image-rendering: pixelated;
+}
+.sh-roster b {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b7c7d7;
+}
+.sh-roster .you b {
+  color: #ffda7d;
+}
+.sh-roster i {
+  font-style: normal;
+  color: #f08d91;
+  letter-spacing: 2px;
+}
+.sh-stage {
+  flex: 1;
+  position: relative;
+  min-height: 340px;
+  overflow: hidden;
+  background: #78bbed;
+}
+.sh-stage > canvas {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  image-rendering: pixelated;
+}
+.sh-intro {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #162d4a57;
+  padding: 25px;
+  text-align: center;
+}
+.sh-tag {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: #fff2bb;
+  text-shadow: 2px 2px #35415d;
+}
+.sh-intro h1 {
+  font-size: clamp(40px, 7vw, 90px);
+  line-height: 0.95;
+  margin: 15px 0 5px;
+  font-weight: 900;
+  letter-spacing: -5px;
+  color: #fff4c8;
+  text-shadow:
+    4px 4px #b25d4b,
+    8px 8px #28334d;
+}
+.sh-intro h1 em {
+  font-style: normal;
+  color: #ffca66;
+}
+.sh-intro p,
+.sh-panel p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #fff1d0;
+  text-shadow: 1px 1px #28354c;
+}
+.sh-cast {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 15px 0 20px;
+}
+.sh-cast button {
+  background: #20334edb;
+  border: 3px solid #758da7;
+  box-shadow: 3px 3px #182744;
+  width: 70px;
+  padding: 10px 5px 7px;
+  color: #d5e2ee;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+.sh-cast button[aria-pressed="true"] {
+  background: #a36d47;
+  border-color: #ffdc8a;
+  translate: 0 -4px;
+  color: #fff7d3;
+  box-shadow: 3px 7px #182744;
+}
+.sh-cast svg {
+  width: 32px;
+  height: 40px;
+  image-rendering: pixelated;
+}
+.sh-cast span {
+  font-size: 9px;
+}
+.sh-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  background: #ffc762;
+  color: #40334b;
+  border: 3px solid #ffedb0;
+  box-shadow: 4px 4px #a36643;
+  padding: 14px 24px;
+  font-size: 13px !important;
+  letter-spacing: 1px;
+}
+.sh-primary:active {
+  translate: 2px 2px;
+  box-shadow: 2px 2px #a36643;
+}
+.sh-intro small,
+.sh-panel small {
+  display: block;
+  font-size: 9px;
+  line-height: 1.8;
+  margin-top: 18px;
+  color: #e0e9e6;
+  text-shadow: 1px 1px #35415d;
+}
+.sh-panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: min(650px, 94%);
+  max-height: 95%;
+  overflow: auto;
+  padding: 28px;
+  text-align: center;
+  background: #233751f2;
+  border: 4px solid #f8dfa3;
+  box-shadow: 8px 8px #28314c;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+}
+.sh-panel h2 {
+  font-size: clamp(20px, 3vw, 32px);
+  color: #ffde8b;
+  margin: 14px 0;
+}
+.sh-panel .sh-cast {
+  margin: 14px 0;
+}
+.sh-ready-players {
+  display: flex;
+  gap: 15px;
+  font-size: 11px;
+  margin: 0 0 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.sh-count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: #1b305b44;
+  color: #fff3c1;
+  text-align: center;
+  text-shadow: 4px 4px #2a3354;
+}
+.sh-count > span {
+  font-size: 14px;
+  background: #20314bd9;
+  padding: 12px;
+}
+.sh-count > b {
+  font-size: 100px;
+}
+.sh-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 14px 24px 16px 80px;
+  background: #1e2c48;
+  border-top: 4px solid #35435e;
+  min-height: 86px;
+}
+.sh-instructions {
+  display: grid;
+  gap: 8px;
+}
+.sh-instructions b {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #f1d69c;
+}
+.sh-instructions span {
+  font-size: 10px;
+  color: #aebed1;
+}
+.sh-buttons {
+  display: flex;
+  gap: 10px;
+}
+.sh-buttons button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 56px;
+  height: 46px;
+  border: 2px solid #748ca4;
+  background: #364d69;
+  box-shadow: 3px 3px #111e34;
+  color: #fff4d2;
+  touch-action: none;
+  user-select: none;
+}
+.sh-buttons .sh-run {
+  font-size: 10px;
+  width: 50px;
+  background: #384e6e;
+  color: #bbd4e2;
+}
+.sh-buttons .sh-jump {
+  width: 105px;
+  background: #c96b68;
+  border-color: #f6b79e;
+  font-size: 12px;
+}
+.sh-buttons button:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px #111e34;
+}
+.sh-watch {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  translate: -50% 0;
+  background: #233751ee;
+  border: 2px solid #ffdf9c;
+  padding: 12px 16px;
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.sh-watch button {
+  background: #ffcc76;
+  border: 0;
+  padding: 8px;
+  color: #28334d;
+}
+.sh-error {
+  padding: 8px 20px;
+  font-size: 12px;
+  background: #813b48;
+  color: #fff0d5;
+  text-align: center;
+}
+.sh-podium {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 20px 0;
+}
+.sh-podium > div {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.sh-podium svg {
+  width: 48px;
+  height: 60px;
+}
+.sh-podium span {
+  font-size: 9px;
+  color: #c6d6e7;
+}
+.sh-link {
+  background: none;
+  border: 0;
+  color: #d6e3ed;
+  padding: 20px;
+  font-size: 11px !important;
+}
+@media (max-width: 650px) {
+  .sh {
+    min-height: 650px;
+  }
+  .sh-hud {
+    height: 65px;
+    padding: 10px 12px 10px 60px;
+    gap: 10px;
+  }
+  .sh-hud > div {
+    font-size: 11px;
+    letter-spacing: 0;
+    gap: 5px;
+  }
+  .sh-hud span {
+    font-size: 8px;
+  }
+  .sh-hud > div:first-of-type {
+    display: none;
+  }
+  .sh-hud .sh-sound {
+    padding: 4px;
+  }
+  .sh-roster {
+    gap: 9px;
+    padding: 5px 10px;
+  }
+  .sh-roster > span {
+    font-size: 8px;
+    gap: 4px;
+    max-width: 150px;
+  }
+  .sh-roster svg {
+    height: 21px;
+    width: 18px;
+  }
+  .sh-roster b {
+    max-width: 68px;
+  }
+  .sh-stage {
+    min-height: 340px;
+  }
+  .sh-intro {
+    padding: 15px;
+  }
+  .sh-intro h1 {
+    font-size: 54px;
+    letter-spacing: -3px;
+  }
+  .sh-tag {
+    font-size: 8px;
+    letter-spacing: 1.3px;
+  }
+  .sh-intro p {
+    font-size: 10px;
+  }
+  .sh-cast {
+    gap: 6px;
+    margin: 15px 0;
+    max-width: 310px;
+  }
+  .sh-cast button {
+    width: 44px;
+    padding: 7px 2px 5px;
+    gap: 5px;
+    border-width: 2px;
+  }
+  .sh-cast svg {
+    width: 24px;
+    height: 30px;
+  }
+  .sh-cast span {
+    font-size: 7px;
+  }
+  .sh-primary {
+    font-size: 11px !important;
+    padding: 12px 16px;
+  }
+  .sh-intro small,
+  .sh-panel small {
+    font-size: 8px;
+  }
+  .sh-panel {
+    padding: 20px 12px;
+    border-width: 3px;
+  }
+  .sh-panel p {
+    font-size: 10px;
+  }
+  .sh-controls {
+    padding: 12px 14px 20px;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .sh-instructions {
+    text-align: center;
+    gap: 5px;
+  }
+  .sh-instructions b {
+    font-size: 9px;
+  }
+  .sh-instructions span {
+    font-size: 8px;
+  }
+  .sh-buttons {
+    width: 100%;
+    gap: 10px;
+  }
+  .sh-buttons button {
+    width: 62px;
+    height: 58px;
+  }
+  .sh-buttons .sh-jump {
+    margin-left: auto;
+    width: 105px;
+  }
+  .sh-buttons .sh-run {
+    width: 42px;
+    font-size: 9px;
+  }
+  .sh-watch {
+    white-space: normal;
+    width: 90%;
+    font-size: 9px;
+  }
+  .sh-count > span {
+    font-size: 10px;
+  }
+}
+@media (max-height: 500px) and (min-width: 651px) {
+  .sh {
+    min-height: 100%;
+    height: auto;
+  }
+  .sh-hud {
+    height: 45px;
+  }
+  .sh-roster {
+    display: none;
+  }
+  .sh-controls {
+    min-height: 65px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .sh-stage {
+    min-height: 260px;
+  }
+  .sh-intro h1 {
+    font-size: 42px;
+    letter-spacing: -2px;
+  }
+  .sh-intro p,
+  .sh-intro small,
+  .sh-intro .sh-tag {
+    display: none;
+  }
+  .sh-cast {
+    margin: 8px;
+  }
+  .sh-cast button {
+    width: 54px;
+    padding: 4px;
+  }
+  .sh-cast svg {
+    height: 26px;
+  }
+  .sh-primary {
+    padding: 8px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sh * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+.sh-intro h1,
+.sh-panel h2,
+.sh-hud b,
+.sh-count > b {
+  font-family:
+    Huddle Pixel,
+    monospace;
+  font-weight: 400;
+  letter-spacing: 1px;
+}
+.sh-intro h1 {
+  font-size: clamp(48px, 7vw, 92px);
+  line-height: 1.1;
+}
+.sh-intro h1 em {
+  letter-spacing: 2px;
+}
+.sh-panel h2 {
+  line-height: 1.4;
+}
+.sh-back {
+  display: block;
+  position: absolute;
+  left: 20px;
+}
+.sh-controls {
+  padding-left: 28px;
+}
+@media (max-width: 650px) {
+  .sh-intro h1 {
+    font-size: 58px;
+    letter-spacing: 1px;
+  }
+  .sh-intro h1 em {
+    letter-spacing: 1px;
+  }
+  .sh-back {
+    left: 12px;
+  }
+  .sh-hud b {
+    font-size: 14px;
+  }
+  .sh-controls {
+    padding-left: 14px;
+  }
+  .sh-panel h2 {
+    font-size: 23px;
+  }
+}
+
+@media (max-width: 650px) {
+  .sh-instructions span,
+  .sh-intro small,
+  .sh-panel small {
+    font-size: 10px;
+  }
+  .sh-intro p,
+  .sh-panel p {
+    font-size: 12px;
+  }
+  .sh-tag {
+    font-size: 9px;
+  }
+  .sh-hud span {
+    font-size: 10px;
+  }
+  .sh-cast span {
+    font-size: 8px;
+  }
+  .sh-roster > span {
+    font-size: 10px;
+  }
+  .sh-intro {
+    overflow: auto;
+  }
+  .sh-intro h1 {
+    font-size: 54px;
+  }
+}

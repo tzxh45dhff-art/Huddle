@@ -8,6 +8,7 @@ import { drawCanvas, drawGame } from '../games/draw.js'
 import { knowMe } from '../games/knowme.js'
 import { mafia } from '../games/mafia.js'
 import { trapDash } from '../games/trapdash.js'
+import { platformer } from '../games/platformer.js'
 import { geoGame } from '../games/geo.js'
 import { trivia } from '../games/trivia.js'
 import { songQuiz } from '../games/songquiz.js'
@@ -43,6 +44,7 @@ const GAMES: Record<string, AnyGame> = {
   [songQuiz.id]: songQuiz,
   [mafia.id]: mafia,
   [geoGame.id]: geoGame,
+  [platformer.id]: platformer,
   [trapDash.id]: trapDash,
 }
 
@@ -179,7 +181,7 @@ function apply(io: Server, roomId: string, by: Player | null, action: string, pa
   if (isError(next)) return next
   session.state = next
   session.seq += 1
-  publish(io, roomId, session.game.id === 'trapdash' && (next as { phase: string }).phase !== 'over')
+  publish(io, roomId, ['platformer', 'trapdash'].includes(session.game.id) && (next as { phase: string }).phase !== 'over')
   void settle(roomId, session)
   followUp(io, roomId, session)
   return { ok: true }
@@ -324,7 +326,7 @@ export function attachPartyGateway(io: Server) {
     socket.on('party:act', async (raw: unknown, maybeAck: unknown) => {
       const ack = ackFrom(maybeAck)
       const body = (raw ?? {}) as Record<string, unknown>
-      const raceInput = body.action === 'input' && typeof body.roomId === 'string' && sessions.get(body.roomId)?.game.id === 'trapdash'
+      const raceInput = body.action === 'input' && typeof body.roomId === 'string' && ['platformer', 'trapdash'].includes(sessions.get(body.roomId)?.game.id ?? '')
       if (!(raceInput ? allowRaceInput() : allowAct())) return ack({ error: 'Slow down a moment' })
       const roomId = await may(body.roomId)
       if (!roomId || typeof body.action !== 'string') return ack({ error: 'Not in this room' })
