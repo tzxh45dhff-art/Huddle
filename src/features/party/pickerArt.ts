@@ -3,6 +3,7 @@
  * Static markup; the motion lives in `gamePicker.css` and wakes on hover.
  */
 export const PICKER_ART: Record<string, string> = {
+  trapdash: `<svg viewBox="0 0 240 200"><circle cx="183" cy="46" r="33" fill="#ffe0a0"/><path d="M0 160Q60 80 130 135T260 115V200H0" fill="#76a693"/><rect x="30" y="134" width="190" height="33" rx="12" fill="#295452"/><rect x="30" y="132" width="190" height="9" rx="4" fill="#c2dfad"/><g transform="rotate(-12 88 90)"><rect x="65" y="60" width="46" height="60" rx="19" fill="#ffd17c"/><circle cx="81" cy="82" r="4" fill="#173c46"/><circle cx="97" cy="82" r="4" fill="#173c46"/><path d="M83 94q7 8 13 0" fill="none" stroke="#173c46" stroke-width="3"/></g><rect x="157" y="85" width="37" height="47" rx="15" fill="#ff94ab"/><circle cx="169" cy="101" r="3" fill="#173c46"/><circle cx="182" cy="101" r="3" fill="#173c46"/><path d="m122 130 19-9-19-9 19-9" fill="none" stroke="#ffd17c" stroke-width="5"/></svg>`,
   fightkaro: `<svg viewBox="0 0 240 200">
     <path d="M127 8 98 91l29-5-21 106 57-125-32 7 31-66z" fill="#ffbd59" opacity=".8"/>
     <circle cx="66" cy="106" r="57" fill="#ffbd59" opacity=".12"/><circle cx="180" cy="106" r="57" fill="#ff7344" opacity=".12"/>

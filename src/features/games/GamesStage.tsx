@@ -25,6 +25,9 @@ import { lazyChunk } from '@/lib/lazyChunk'
 import { petCue } from '@/features/pet/petCues'
 import type { GeoOptions, GeoView } from '@/features/party/geo/types'
 
+import type { TrapDashView } from '../../../server/src/games/trapdash.physics'
+
+const TrapDash = lazyChunk(() => import('./trapdash/TrapDash'))
 const PenFightGame = lazyChunk(() => import('@/features/games/penfight/PenFightGame'))
 const GeoSetup = lazyChunk(() => import('@/features/party/geo/GeoGame').then(m => ({ default: m.GeoSetup })))
 const GeoTable = lazyChunk(() => import('@/features/party/geo/GeoGame').then(m => ({ default: m.GeoTable })))
@@ -193,6 +196,16 @@ export function GamesStage({
           />
         )}
 
+        {screen === 'trapdash' && <Suspense fallback={<div className="grid h-full place-items-center text-mist">Opening the gardens…</div>}>
+          {party.party && party.party.game !== 'trapdash' ? <Busy label={party.party.label} onOpen={() => setScreen(party.party!.game as GameId)} /> : <TrapDash
+            key={party.party?.session ?? 'lobby'}
+            party={party.party as PartyState<TrapDashView> | null}
+            selfId={selfId} connected={connected} error={party.error}
+            act={(action, payload) => party.act(action, payload, 3000)}
+            onStart={() => party.start('trapdash', {})}
+            onDismiss={() => { void party.dismiss(); setScreen('picker') }}
+          />}
+        </Suspense>}
         {screen === 'fightkaro' && <FightKaroStage roomId={roomId} onClose={() => setScreen('picker')} />}
 
         {screen === 'geo' && <Suspense fallback={<div className="grid h-full place-items-center text-mist"><Loader2 className="size-6 animate-spin" /></div>}>

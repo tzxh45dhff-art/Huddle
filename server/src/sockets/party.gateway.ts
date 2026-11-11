@@ -7,6 +7,7 @@ import { markSeen, seenFor } from '../services/seen.service.js'
 import { drawCanvas, drawGame } from '../games/draw.js'
 import { knowMe } from '../games/knowme.js'
 import { mafia } from '../games/mafia.js'
+import { trapDash } from '../games/trapdash.js'
 import { geoGame } from '../games/geo.js'
 import { trivia } from '../games/trivia.js'
 import { songQuiz } from '../games/songquiz.js'
@@ -42,6 +43,7 @@ const GAMES: Record<string, AnyGame> = {
   [songQuiz.id]: songQuiz,
   [mafia.id]: mafia,
   [geoGame.id]: geoGame,
+  [trapDash.id]: trapDash,
 }
 
 /**
@@ -101,7 +103,7 @@ const RECONNECTING_MS = 60_000
 type Ack = (reply: unknown) => void
 const ackFrom = (maybe: unknown): Ack => (typeof maybe === 'function' ? (maybe as Ack) : () => undefined)
 
-function publish(io: Server, roomId: string) {
+function publish(io: Server, roomId: string, quietStatus = false) {
   const session = sessions.get(roomId)
   const board = session ? CANVASES[session.game.id] : undefined
   if (board) {
@@ -131,7 +133,7 @@ function publish(io: Server, roomId: string) {
     )
   }
   /* The hub and the game picker only need to know something is on. */
-  io.to(roomId).emit('party:status', {
+  if (!quietStatus) io.to(roomId).emit('party:status', {
     roomId,
     game: session?.game.id ?? null,
     label: session?.game.label ?? null,
@@ -177,7 +179,7 @@ function apply(io: Server, roomId: string, by: Player | null, action: string, pa
   if (isError(next)) return next
   session.state = next
   session.seq += 1
-  publish(io, roomId)
+  publish(io, roomId, session.game.id === 'trapdash' && (next as { phase: string }).phase !== 'over')
   void settle(roomId, session)
   followUp(io, roomId, session)
   return { ok: true }
@@ -191,6 +193,7 @@ export function attachPartyGateway(io: Server) {
     const may = roomGuard(socket, self.id)
     /* A person taps a few times a second at most; a flood is a bug or abuse, and must not take the server down. */
     const allowAct = tokenBucket(20, 4_000)
+    const allowRaceInput = tokenBucket(60, 4_000)
     const allowGeoPing = tokenBucket(8, 4_000)
     const allowFill = tokenBucket(4, 1_000)
     socket.on('geo:ping', (raw: unknown) => {
@@ -320,8 +323,9 @@ export function attachPartyGateway(io: Server) {
 
     socket.on('party:act', async (raw: unknown, maybeAck: unknown) => {
       const ack = ackFrom(maybeAck)
-      if (!allowAct()) return ack({ error: 'Slow down a moment' })
       const body = (raw ?? {}) as Record<string, unknown>
+      const raceInput = body.action === 'input' && typeof body.roomId === 'string' && sessions.get(body.roomId)?.game.id === 'trapdash'
+      if (!(raceInput ? allowRaceInput() : allowAct())) return ack({ error: 'Slow down a moment' })
       const roomId = await may(body.roomId)
       if (!roomId || typeof body.action !== 'string') return ack({ error: 'Not in this room' })
       const payload = (typeof body.payload === 'object' && body.payload !== null ? body.payload : {}) as Record<string, unknown>
