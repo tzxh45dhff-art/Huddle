@@ -5,6 +5,8 @@ import {
   STEP,
   makeHero,
   stepHero,
+  PLACE_POINTS,
+  compareStandings,
 } from "./platformer.physics.js";
 import type { Adventure } from "./platformer.physics.js";
 export type { Adventure } from "./platformer.physics.js";
@@ -14,9 +16,11 @@ function reset(s: Adventure, ctx: Ctx) {
   s.broken = [];
   s.defeated = [];
   s.time = ctx.now();
-  s.players = s.players.map((p, i) => ({
+  s.players = s.players.map((p) => ({
     ...makeHero(p.id, p.name, p.character),
-    x: 70 + i * 36,
+    x: 70,
+    racePoints: p.racePoints,
+    falls: p.falls,
     score: p.score,
     coins: p.coins,
   }));
@@ -124,7 +128,7 @@ export const platformer: GameDef<Adventure, { character?: number }> = {
     else if (s.phase === "countdown" && now >= s.deadline) {
       s.phase = "play";
       s.time = now;
-      s.deadline = now + 180000;
+      s.deadline = now + [110000, 100000, 95000][s.level]!;
     } else if (s.phase === "play") {
       const steps = Math.min(
         12,
@@ -132,25 +136,40 @@ export const platformer: GameDef<Adventure, { character?: number }> = {
       );
       for (let i = 0; i < steps; i++) {
         s.time += STEP * 1000;
-        for (const p of s.players) stepHero(p, s, s.time);
+        // Rotate simulation priority so contested pickups don't always favour the host.
+        const offset = Math.floor(s.time / (STEP * 1000)) % s.players.length;
+        for (let j = 0; j < s.players.length; j++)
+          stepHero(
+            s.players[(j + offset) % s.players.length]!,
+            s,
+            s.time,
+            STEP,
+            false,
+            ctx.random,
+          );
+        for (const p of s.players.filter((p) => p.finished && !p.place)) {
+          p.place =
+            1 +
+            s.players.filter((q) => q.finished && q.finishedAt < p.finishedAt)
+              .length;
+          p.racePoints += PLACE_POINTS[p.place - 1] ?? 1;
+        }
       }
       if (now - s.time > 200) s.time = now;
-      // Friends have time to explore; the first flag gives stragglers a generous finish window.
+      // First finisher starts the final sprint. Each course always runs exactly once.
       if (s.players.some((p) => p.finished))
-        s.deadline = Math.min(s.deadline, now + 20000);
+        s.deadline = Math.min(s.deadline, now + 15000);
       if (s.players.every((p) => p.finished) || now >= s.deadline) {
         s.phase = "clear";
-        s.deadline = now + 6000;
+        s.deadline = now + 8000;
       }
     } else if (s.phase === "clear" && now >= s.deadline) {
-      if (s.players.some((p) => p.finished)) {
-        s.level++;
-        if (s.level >= LEVELS.length) {
-          s.level = LEVELS.length - 1;
-          s.phase = "over";
-          s.outcome = "won";
-          return s;
-        }
+      s.level++;
+      if (s.level >= LEVELS.length) {
+        s.level = LEVELS.length - 1;
+        s.phase = "over";
+        s.outcome = "won";
+        return s;
       }
       reset(s, ctx);
     }
@@ -165,8 +184,8 @@ export const platformer: GameDef<Adventure, { character?: number }> = {
     )
       return null;
     const hero = makeHero(p.id, p.name, s.players.length % 6);
-    const leader = s.players.find((q) => !q.finished);
-    hero.checkpoint = leader?.checkpoint ?? 70;
+    // A late entrant starts at the same line, never ahead of racers already playing.
+    hero.checkpoint = 70;
     hero.x = hero.checkpoint;
     hero.y = 310;
     hero.immune = ctx.now() + 2000;
@@ -179,10 +198,12 @@ export const platformer: GameDef<Adventure, { character?: number }> = {
           summary: {
             worlds: s.level + 1,
             coins: s.teamCoins,
-            scores: s.players.map((p) => ({
+            scores: [...s.players].sort(compareStandings).map((p) => ({
               id: p.id,
               name: p.name,
               score: p.score,
+              racePoints: p.racePoints,
+              coins: p.coins,
             })),
           },
         }

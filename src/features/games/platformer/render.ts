@@ -2,8 +2,12 @@ import {
   LEVELS,
   solidAt,
   enemyAt,
+  hazardAt,
+  hasPower,
+  POWERS,
 } from "../../../../server/src/games/platformer.physics";
 import type { Adventure } from "../../../../server/src/games/platformer.physics";
+import { drawPowerIcon } from "./powerArt";
 import { drawSprite } from "./spriteArt";
 export type Camera = {
   x: number;
@@ -133,7 +137,15 @@ export function render(
   }
   for (const base of level.solids) {
     if (s.broken.includes(base.id)) continue;
-    const tile = solidAt(base, s.time);
+    const tile = { ...solidAt(base, s.time) };
+    const bump = s.players.find(
+      (p) =>
+        p.pickup &&
+        s.time - p.pickup.at < 240 &&
+        p.pickup.x === base.x + base.w / 2,
+    );
+    if (bump?.pickup && !reduced)
+      tile.y -= Math.sin(((s.time - bump.pickup.at) / 240) * Math.PI) * 7;
     if (tile.x + tile.w < m.x - 40 || tile.x > m.x + virtualW + 40) continue;
     if (tile.kind === "ground") {
       const depth = Math.max(tile.h, virtualH + cameraY - tile.y + 10);
@@ -219,6 +231,46 @@ export function render(
     );
     rect(c, coin.x - 1, coin.y - 4, 2, 6, "#fff4b6");
   }
+  for (const base of level.hazards) {
+    const h = hazardAt(base, s.time);
+    if (h.x + h.w < m.x || h.x > m.x + virtualW) continue;
+    if (h.kind === "spikes") {
+      rect(c, h.x, h.y + h.h - 3, h.w, 3, "#563d60");
+      for (let x = h.x; x < h.x + h.w; x += 12) {
+        c.fillStyle = "#493951";
+        c.beginPath();
+        c.moveTo(x, h.y + h.h);
+        c.lineTo(x + 6, h.y);
+        c.lineTo(x + 12, h.y + h.h);
+        c.fill();
+        c.fillStyle = "#ffe0d2";
+        c.beginPath();
+        c.moveTo(x + 3, h.y + h.h - 2);
+        c.lineTo(x + 6, h.y + 4);
+        c.lineTo(x + 7, h.y + h.h - 2);
+        c.fill();
+      }
+    } else {
+      rect(
+        c,
+        base.x - (base.range ?? 0),
+        h.y + 11,
+        (base.range ?? 0) * 2 + h.w,
+        2,
+        "#7887ae",
+      );
+      c.save();
+      c.translate(h.x + 12, h.y + 12);
+      if (!reduced) c.rotate(s.time / 130);
+      for (let k = 0; k < 8; k++) {
+        c.rotate(Math.PI / 4);
+        rect(c, -3, -16, 6, 12, "#d9e8ec");
+      }
+      rect(c, -8, -8, 16, 16, "#a0bac9");
+      rect(c, -3, -3, 6, 6, "#ed766e");
+      c.restore();
+    }
+  }
   for (const checkpoint of level.checkpoints) {
     rect(c, checkpoint, 336, 3, 48, "#f7efd8");
     rect(
@@ -280,6 +332,38 @@ export function render(
     pos.y += (p.y - pos.y) * t;
     if (p.immune > s.time && Math.floor(s.time / 90) % 2 === 0)
       c.globalAlpha = 0.45;
+    if (p.boost && p.power > s.time) {
+      c.save();
+      c.strokeStyle = POWERS[p.boost].color;
+      c.lineWidth = 1.5;
+      c.strokeRect(Math.round(pos.x - 15), Math.round(pos.y - 34), 30, 37);
+      if (hasPower(p, "dash", s.time) && Math.abs(p.vx) > 100 && !reduced) {
+        for (let k = 1; k < 4; k++) {
+          c.globalAlpha = 0.5 / k;
+          rect(
+            c,
+            pos.x - Math.sign(p.vx) * (14 + k * 7),
+            pos.y - 22 + k * 3,
+            6,
+            2,
+            POWERS.dash.color,
+          );
+        }
+      }
+      if (hasPower(p, "magnet", s.time) && !reduced) {
+        c.globalAlpha = 0.25;
+        c.beginPath();
+        c.arc(
+          pos.x,
+          pos.y - 15,
+          25 + Math.sin(s.time / 180) * 4,
+          0,
+          Math.PI * 2,
+        );
+        c.stroke();
+      }
+      c.restore();
+    }
     drawSprite(
       c,
       p.character,
@@ -289,7 +373,7 @@ export function render(
         ? Math.floor(s.time / 90)
         : 0,
       p.vx < 0 ? -1 : 1,
-      p.power > s.time && Math.floor(s.time / 130) % 3 === 0,
+      hasPower(p, "star", s.time) && Math.floor(s.time / 130) % 3 === 0,
     );
     c.globalAlpha = 1;
     c.font = "bold 8px monospace";
@@ -303,6 +387,23 @@ export function render(
       pos.y - 38,
     );
     c.fillText(p.id === self ? "YOU" : p.name.slice(0, 10), pos.x, pos.y - 38);
+    if (p.pickup) {
+      const age = s.time - p.pickup.at;
+      if (age >= 0 && age < 1300) {
+        const rise = reduced ? 26 : Math.min(38, age / 14),
+          fade = age < 950 ? 1 : 1 - (age - 950) / 350;
+        c.globalAlpha = fade;
+        rect(c, p.pickup.x - 14, p.pickup.y - rise - 29, 28, 28, "#243452");
+        drawPowerIcon(
+          c,
+          p.pickup.kind,
+          p.pickup.x - 12,
+          p.pickup.y - rise - 27,
+          3,
+        );
+        c.globalAlpha = 1;
+      }
+    }
     const age = s.time - p.effectAt;
     if (
       age >= 0 &&

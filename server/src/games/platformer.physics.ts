@@ -19,6 +19,52 @@ export type Effect =
   | "coin"
   | "power"
   | "stomp";
+export const POWERS = {
+  star: {
+    name: "STAR GUARD",
+    hint: "Smash enemies and bricks. Ignore hazards.",
+    seconds: 7,
+    color: "#ffe16b",
+    glyph: "★",
+  },
+  dash: {
+    name: "TURBO BOOTS",
+    hint: "Run faster. Carry more speed into jumps.",
+    seconds: 9,
+    color: "#7de1ff",
+    glyph: "»",
+  },
+  spring: {
+    name: "SPRING BOOTS",
+    hint: "Jump higher. Reach the upper shortcuts.",
+    seconds: 10,
+    color: "#b9ee82",
+    glyph: "↑",
+  },
+  magnet: {
+    name: "COIN MAGNET",
+    hint: "Pull in nearby coins. Win the tiebreak.",
+    seconds: 10,
+    color: "#ffa2cb",
+    glyph: "U",
+  },
+} as const;
+export type PowerKind = keyof typeof POWERS;
+export const POWER_KINDS = Object.keys(POWERS) as PowerKind[];
+export const PLACE_POINTS = [10, 7, 5, 3, 2, 1, 1, 1];
+export function hasPower(p: Hero, kind: PowerKind, time: number) {
+  return p.boost === kind && p.power > time;
+}
+/** Equal race points and coins share a standing. Player array order never breaks a tie. */
+export function compareStandings(a: Hero, b: Hero) {
+  return b.racePoints - a.racePoints || b.coins - a.coins;
+}
+export function raceOrder(players: Hero[]) {
+  return [...players].sort(
+    (a, b) =>
+      (a.finishedAt || Infinity) - (b.finishedAt || Infinity) || b.x - a.x,
+  );
+}
 export type Input = {
   dir: number;
   jump: boolean;
@@ -43,6 +89,12 @@ export type Hero = {
   hearts: number;
   immune: number;
   power: number;
+  boost: PowerKind | null;
+  pickup: { kind: PowerKind; x: number; y: number; at: number } | null;
+  racePoints: number;
+  place: number;
+  finishedAt: number;
+  falls: number;
   coins: number;
   score: number;
   finished: boolean;
@@ -69,6 +121,14 @@ export type Enemy = {
   speed: number;
   kind: "beetle" | "slime";
 };
+export type Hazard = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  kind: "spikes" | "saw";
+  range?: number;
+};
 export type Level = {
   name: string;
   subtitle: string;
@@ -79,6 +139,7 @@ export type Level = {
   enemies: Enemy[];
   checkpoints: number[];
   flag: number;
+  hazards: Hazard[];
 };
 export type World = {
   level: number;
@@ -107,6 +168,12 @@ export function makeHero(id: string, name: string, character = 0): Hero {
     hearts: 3,
     immune: 0,
     power: 0,
+    boost: null,
+    pickup: null,
+    racePoints: 0,
+    place: 0,
+    finishedAt: 0,
+    falls: 0,
     coins: 0,
     score: 0,
     finished: false,
@@ -137,21 +204,21 @@ function buildLevel(index: number): Level {
   const gaps =
     index === 0
       ? [
-          [960, 1056],
-          [1856, 1952],
+          [928, 1056],
+          [1824, 1952],
           [2720, 2848],
         ]
       : index === 1
         ? [
-            [800, 896],
-            [1504, 1632],
-            [2400, 2528],
+            [768, 896],
+            [1472, 1632],
+            [2368, 2528],
           ]
         : [
-            [736, 864],
-            [1344, 1504],
-            [2208, 2400],
-            [2816, 2944],
+            [704, 864],
+            [1312, 1504],
+            [2176, 2400],
+            [2752, 2944],
           ];
   let start = 0;
   for (const [a, b] of gaps) {
@@ -203,6 +270,34 @@ function buildLevel(index: number): Level {
         x: a! - 32 + (k * (b! - a! + 64)) / 4,
         y: 320 - Math.sin((k / 4) * Math.PI) * 65,
       });
+  // Upper routes trade a precise approach jump for a clear run above enemies.
+  for (const x of [440, 1648, 2448]) {
+    add(x, 240, 96, 14, "platform");
+    add(x + 128, 208, 64, 14, "platform", index > 0 ? 24 : undefined);
+    for (let k = 0; k < 4; k++)
+      coins.push({ id: `c${coins.length}`, x: x + 16 + k * 22, y: 216 });
+  }
+  const hazards: Hazard[] = [];
+  for (const x of [
+    432,
+    1440,
+    2560,
+    ...(index > 0 ? [1830] : []),
+    ...(index > 1 ? [3060] : []),
+  ]) {
+    const w = 32 + index * 8;
+    if (
+      solids.some(
+        (s) => s.kind === "ground" && x >= s.x && x + w <= s.x + s.w,
+      ) &&
+      !gaps.some(([, b]) => Math.abs(x - b! - 32) < 60)
+    )
+      hazards.push({ x, y: 370, w, h: 14, kind: "spikes" });
+  }
+  if (index > 0)
+    hazards.push({ x: 1890, y: 285, w: 24, h: 24, kind: "saw", range: 70 });
+  if (index > 1)
+    hazards.push({ x: 2470, y: 284, w: 24, h: 24, kind: "saw", range: 80 });
   // Keep the entire patrol on ground and out of pipe collision bounds.
   [720, 1328, 1700, 2300, 3040].forEach((wanted, i) => {
     const candidates = Array.from(
@@ -224,7 +319,7 @@ function buildLevel(index: number): Level {
         x,
         y: 384,
         range: 60,
-        speed: 35 + index * 9,
+        speed: 45 + index * 18,
         kind: i % 2 ? "slime" : "beetle",
       });
   });
@@ -236,6 +331,7 @@ function buildLevel(index: number): Level {
       "One last leap together",
     ][index]!,
     theme,
+    hazards,
     width: 3456,
     solids,
     coins,
@@ -250,6 +346,9 @@ export function solidAt(s: Rect, time: number): Rect {
     ? { ...s, x: s.x + Math.sin(time / 1100 + Number(s.id.slice(1))) * s.move }
     : s;
 }
+export function hazardAt(h: Hazard, time: number) {
+  return { ...h, x: h.x + (h.range ? Math.sin(time / 850) * h.range : 0) };
+}
 export function enemyAt(e: Enemy, time: number) {
   return {
     x: e.x + Math.sin(((time / 1000) * e.speed) / e.range) * e.range,
@@ -258,6 +357,12 @@ export function enemyAt(e: Enemy, time: number) {
 }
 const overlap = (a: number, b: number, c: number, d: number) => a < d && b > c;
 function respawn(p: Hero, time: number) {
+  p.falls++;
+  p.boost = null;
+  p.power = 0;
+  p.grounded = false;
+  p.coyote = 0;
+  p.buffer = 0;
   p.x = p.checkpoint;
   p.y = 310;
   p.vx = 0;
@@ -268,7 +373,7 @@ function respawn(p: Hero, time: number) {
   event(p, "fall", time);
 }
 function damage(p: Hero, time: number, fromX: number) {
-  if (p.immune > time || p.power > time) return;
+  if (p.immune > time || hasPower(p, "star", time)) return;
   p.hearts--;
   p.immune = time + 1800;
   p.vx = p.x < fromX ? -190 : 190;
@@ -282,6 +387,7 @@ export function stepHero(
   time: number,
   dt = STEP,
   predict = false,
+  random: (max: number) => number = () => 0,
 ) {
   if (p.finished) return;
   const level = LEVELS[world.level]!,
@@ -292,12 +398,18 @@ export function stepHero(
   p.jumpHeld = jump;
   p.buffer = Math.max(0, p.buffer - dt);
   p.coyote = p.grounded ? 0.1 : Math.max(0, p.coyote - dt);
-  const speed = p.input.run ? 250 : 185,
+  const speed = hasPower(p, "dash", time)
+      ? p.input.run
+        ? 320
+        : 250
+      : p.input.run
+        ? 250
+        : 185,
     target = dir * speed,
     accel = dir ? 1800 : 2200;
   p.vx += Math.max(-accel * dt, Math.min(accel * dt, target - p.vx));
   if (p.buffer > 0 && p.coyote > 0) {
-    p.vy = -430;
+    p.vy = hasPower(p, "spring", time) ? -510 : -430;
     p.grounded = false;
     p.coyote = 0;
     p.buffer = 0;
@@ -357,17 +469,13 @@ export function stepHero(
       if (!predict && !world.used.includes(s.id)) {
         if (s.kind === "box" || s.kind === "power") {
           world.used.push(s.id);
-          if (s.kind === "power") {
-            p.power = time + 10000;
-            p.hearts = 3;
-            event(p, "power", time);
-          } else {
-            world.teamCoins++;
-            p.coins++;
-            p.score += 100;
-            event(p, "coin", time);
-          }
-        } else if (s.kind === "brick" && p.power > time) {
+          const kind = POWER_KINDS[random(POWER_KINDS.length)] ?? "star";
+          p.boost = kind;
+          p.power = time + POWERS[kind].seconds * 1000;
+          p.pickup = { kind, x: s.x + s.w / 2, y: s.y, at: time };
+          p.score += 100;
+          event(p, "power", time);
+        } else if (s.kind === "brick" && hasPower(p, "star", time)) {
           world.broken.push(s.id);
           p.score += 50;
         }
@@ -378,8 +486,8 @@ export function stepHero(
     for (const coin of level.coins) {
       if (
         !world.collected.includes(coin.id) &&
-        Math.abs(p.x - coin.x) < 17 &&
-        Math.abs(p.y - 15 - coin.y) < 24
+        Math.hypot(p.x - coin.x, p.y - 15 - coin.y) <
+          (hasPower(p, "magnet", time) ? 105 : 24)
       ) {
         world.collected.push(coin.id);
         world.teamCoins++;
@@ -392,7 +500,7 @@ export function stepHero(
       if (world.defeated.includes(enemy.id)) continue;
       const e = enemyAt(enemy, time);
       if (Math.abs(p.x - e.x) < 22 && p.y > e.y - 24 && p.y - 28 < e.y) {
-        if ((p.vy >= 0 && oldY <= e.y - 16) || p.power > time) {
+        if ((p.vy >= 0 && oldY <= e.y - 16) || hasPower(p, "star", time)) {
           world.defeated.push(enemy.id);
           p.vy = -290;
           p.score += 200;
@@ -400,11 +508,20 @@ export function stepHero(
         } else damage(p, time, e.x);
       }
     }
+    for (const hazard of level.hazards) {
+      const h = hazardAt(hazard, time);
+      if (
+        overlap(p.x - 9, p.x + 9, h.x, h.x + h.w) &&
+        overlap(p.y - 28, p.y, h.y, h.y + h.h)
+      )
+        damage(p, time, h.x + h.w / 2);
+    }
     for (const checkpoint of level.checkpoints)
       if (p.x >= checkpoint && checkpoint > p.checkpoint)
         p.checkpoint = checkpoint;
     if (p.x >= level.flag) {
       p.finished = true;
+      p.finishedAt = time;
       p.score += 1000;
       event(p, "finish", time);
     }

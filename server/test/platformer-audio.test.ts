@@ -97,6 +97,16 @@ test("audio survives scene changes, layers distinct effects, respects mute and r
     audio.setMuted(false);
     audio.play("finish");
     assert.equal(contexts[0]!.voices - before, 4);
+    for (const kind of ["star", "dash", "spring", "magnet"] as const) {
+      const beforePower = contexts[0]!.voices;
+      audio.powerup(kind);
+      assert.equal(contexts[0]!.voices - beforePower, 5);
+    }
+    const beforeMutedPower = contexts[0]!.voices;
+    audio.setMuted(true);
+    audio.powerup("star");
+    assert.equal(contexts[0]!.voices, beforeMutedPower);
+    audio.setMuted(false);
     await audio.pause();
     assert.equal(contexts[0]!.state, "suspended");
     await audio.unlock();

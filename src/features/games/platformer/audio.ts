@@ -1,4 +1,7 @@
-import type { Effect } from "../../../../server/src/games/platformer.physics";
+import type {
+  Effect,
+  PowerKind,
+} from "../../../../server/src/games/platformer.physics";
 
 /** Small original arcade score and layered Foley, synthesized locally. No downloads or autoplay. */
 export class AdventureAudio {
@@ -166,6 +169,24 @@ export class AdventureAudio {
         n(660, 990, 0.24, 0.13, "triangle");
         break;
     }
+  }
+  powerup(kind: PowerKind) {
+    const notes: Record<PowerKind, number[]> = {
+      star: [523, 659, 784, 1047, 1319],
+      dash: [220, 330, 494, 740, 1109],
+      spring: [196, 392, 294, 587, 784],
+      magnet: [880, 659, 988, 784, 1175],
+    };
+    notes[kind].forEach((f, i) =>
+      this.note(
+        f,
+        kind === "dash" ? f * 1.25 : f,
+        0.15,
+        0.12,
+        kind === "spring" ? "triangle" : "square",
+        i * 0.06,
+      ),
+    );
   }
   private music() {
     const a = this.context;

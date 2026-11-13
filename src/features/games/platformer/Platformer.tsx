@@ -6,14 +6,40 @@ import {
   STEP,
   makeHero,
   stepHero,
+  POWERS,
+  POWER_KINDS,
+  PLACE_POINTS,
+  compareStandings,
+  raceOrder,
 } from "../../../../server/src/games/platformer.physics";
 import type { Adventure } from "../../../../server/src/games/platformer.physics";
 import type { PartyState } from "@/features/party/useParty";
 import { remaining } from "@/features/party/useParty";
+import { POWER_PIXELS } from "./powerArt";
 import { Portrait } from "./sprites";
 import { render, type Camera } from "./render";
 import { AdventureAudio } from "./audio";
 import "./platformer.css";
+function PowerIcon({ kind }: { kind: keyof typeof POWERS }) {
+  return (
+    <svg viewBox="0 0 8 8" aria-hidden="true" shapeRendering="crispEdges">
+      {POWER_PIXELS[kind].flatMap((row, y) =>
+        [...row].map((on, x) =>
+          on === "X" ? (
+            <rect
+              key={`${x}:${y}`}
+              x={x}
+              y={y}
+              width="1"
+              height="1"
+              fill={POWERS[kind].color}
+            />
+          ) : null,
+        ),
+      )}
+    </svg>
+  );
+}
 type Reply = { error?: string; ok?: boolean } | unknown;
 export default function Platformer({
   party,
@@ -49,12 +75,53 @@ export default function Platformer({
   send.current = act;
   const audio = useRef<AdventureAudio | null>(null);
   if (!audio.current) audio.current = new AdventureAudio();
+  const seenPickups = useRef(new Map<string, number>());
   const seen = useRef(new Map<string, number>()),
     state = party?.view,
     me = state?.players.find((p) => p.id === selfId),
     phase = state?.phase,
     epoch = state?.epoch;
   const hasParty = !!party;
+  const standings = state ? [...state.players].sort(compareStandings) : [];
+  const leaders = state ? raceOrder(state.players) : [];
+  const champion = standings[0];
+  const tied = champion
+    ? standings.filter((p) => compareStandings(p, champion) === 0)
+    : [];
+  const boost = me?.boost && me.power > (state?.time ?? 0) ? me.boost : null;
+  const rank = me ? leaders.findIndex((p) => p.id === me.id) + 1 : 0;
+  const results = (
+    <div className="sh-results" role="table" aria-label="Race standings">
+      <div role="row" className="sh-results-head">
+        <span role="columnheader">#</span>
+        <span role="columnheader" aria-label="Character" />
+        <span role="columnheader">RACER</span>
+        <span role="columnheader">
+          {phase === "clear" ? "FINISH" : "COINS"}
+        </span>
+        <span role="columnheader">TOTAL</span>
+      </div>
+      {standings.map((p) => (
+        <div role="row" key={p.id} className={p.id === selfId ? "you" : ""}>
+          <span role="cell">
+            {1 + standings.filter((q) => compareStandings(q, p) < 0).length}
+          </span>
+          <span role="cell">
+            <Portrait character={p.character} />
+          </span>
+          <b role="cell">{p.id === selfId ? "YOU" : p.name}</b>
+          <span role="cell">
+            {phase === "clear"
+              ? p.place
+                ? `#${p.place} +${PLACE_POINTS[p.place - 1] ?? 1}`
+                : "DNF"
+              : `${p.coins} coins`}
+          </span>
+          <strong role="cell">{p.racePoints} pts</strong>
+        </div>
+      ))}
+    </div>
+  );
   const seconds =
     party && state ? Math.ceil(remaining(party, state.deadline) / 1000) : 0;
   useEffect(() => {
@@ -80,9 +147,14 @@ export default function Platformer({
   useEffect(() => {
     if (!state || phase !== "play") return;
     for (const p of state.players) {
+      if (p.pickup && p.pickup.at > (seenPickups.current.get(p.id) ?? 0)) {
+        seenPickups.current.set(p.id, p.pickup.at);
+        if (p.id === selfId && state.time - p.pickup.at < 600)
+          audio.current?.powerup(p.pickup.kind);
+      }
       if (p.event > (seen.current.get(p.id) ?? 0)) {
         seen.current.set(p.id, p.event);
-        if (state.time - p.effectAt < 600)
+        if (state.time - p.effectAt < 600 && p.effect !== "power")
           audio.current?.play(
             p.effect,
             p.id === selfId
@@ -322,13 +394,13 @@ export default function Platformer({
           <ArrowLeft size={18} />
         </button>
         <div>
-          <span>SUPER HUDDLE</span>
-          <b>{me ? String(me.score).padStart(6, "0") : "LET’S GO!"}</b>
+          <span>RACE POINTS</span>
+          <b>{me ? `${me.racePoints} PTS` : "LET’S GO!"}</b>
         </div>
         <div>
-          <span>COINS</span>
+          <span>YOUR COINS</span>
           <b className="sh-gold">
-            ◆ × {String(state?.teamCoins ?? 0).padStart(2, "0")}
+            ◆ × {String(me?.coins ?? 0).padStart(2, "0")}
           </b>
         </div>
         <div>
@@ -364,10 +436,12 @@ export default function Platformer({
       )}
       {state && (
         <div className="sh-roster">
-          {state.players.map((p) => (
+          {leaders.map((p, index) => (
             <span key={p.id} className={p.id === selfId ? "you" : ""}>
               <Portrait character={p.character} />
-              <b>{p.id === selfId ? "YOU" : p.name}</b>
+              <b>
+                #{p.place || index + 1} {p.id === selfId ? "YOU" : p.name}
+              </b>
               <i>
                 {p.finished
                   ? "⚑"
@@ -382,9 +456,45 @@ export default function Platformer({
           ref={canvas}
           aria-label="Side-scrolling pixel platform adventure"
         />
+        {phase === "play" && me && !me.finished && (
+          <div className="sh-race-hud">
+            <div className="sh-position">
+              <strong>#{me.place || rank}</strong>
+              <span>
+                OF {state!.players.length}
+                <br />
+                {me.racePoints} RACE PTS
+              </span>
+            </div>
+            {boost ? (
+              <div
+                className="sh-boost"
+                style={{ borderColor: POWERS[boost].color }}
+              >
+                <PowerIcon kind={boost} />
+                <div>
+                  <b>{POWERS[boost].name}</b>
+                  <span>
+                    {Math.ceil((me.power - state!.time) / 1000)}s ·{" "}
+                    {POWERS[boost].hint}
+                  </span>
+                  <progress
+                    max={POWERS[boost].seconds * 1000}
+                    value={me.power - state!.time}
+                    aria-label={`${POWERS[boost].name} remaining`}
+                  />
+                </div>
+              </div>
+            ) : (
+              <span className="sh-box-hint">
+                Bump ? boxes for a random boost
+              </span>
+            )}
+          </div>
+        )}
         {!state && (
           <div className="sh-intro">
-            <span className="sh-tag">A LITTLE WORLD. A BIG ADVENTURE.</span>
+            <span className="sh-tag">THREE COURSES. ONE CHAMPION.</span>
             <h1>
               SUPER
               <br />
@@ -393,7 +503,7 @@ export default function Platformer({
             <p>
               Pick your hero. Bring your friends.
               <br />
-              Every coin, every jump, together.
+              Grab a power-up. Beat them to the flag.
             </p>
             {selection}
             <button
@@ -401,11 +511,11 @@ export default function Platformer({
               onClick={() => void start()}
               disabled={busy || !connected}
             >
-              {busy ? "OPENING WORLD…" : "START ADVENTURE"}{" "}
+              {busy ? "OPENING WORLD…" : "START RACING"}{" "}
               <ArrowRight size={18} />
             </button>
             <small>
-              1–8 players · 3 worlds · Drop-in multiplayer
+              1–8 racers · 3 courses · Random power-ups
               <br />
               Arrows / A D to move · Hold Space / Z to jump higher
             </small>
@@ -417,10 +527,23 @@ export default function Platformer({
             <h2>CHOOSE YOUR HERO</h2>
             {selection}
             <p>
-              Jump under ? blocks. Stomp enemies from above.
+              Bump ? boxes for a random power-up. Race to the flag.
               <br />
-              Hold jump for height. Flags save your progress.
+              Finish points: 10 / 7 / 5 / 3 / 2 / 1. Coins break ties.
             </p>
+            <div className="sh-power-guide">
+              {POWER_KINDS.map((kind) => (
+                <span key={kind} title={POWERS[kind].hint}>
+                  <PowerIcon kind={kind} />
+                  <b>{POWERS[kind].name}</b>
+                </span>
+              ))}
+            </div>
+            <small>
+              Hold jump for height. Spikes hurt. Stars protect you.
+              <br />
+              First finisher starts a 15-second final sprint.
+            </small>
             <div className="sh-ready-players">
               {state.players.map((p) => (
                 <span key={p.id}>
@@ -436,11 +559,11 @@ export default function Platformer({
               >
                 {state.ready.includes(me.id)
                   ? "WAITING FOR FRIENDS…"
-                  : "READY TO EXPLORE"}
+                  : "READY TO RACE"}
               </button>
             ) : (
               <button className="sh-primary" onClick={onJoin}>
-                JOIN ADVENTURE
+                JOIN RACE
               </button>
             )}
             <small>Starts in {seconds}s · Everyone ready? We go now.</small>
@@ -456,57 +579,48 @@ export default function Platformer({
         )}
         {phase === "clear" && (
           <section className="sh-panel compact">
-            <span className="sh-tag">
-              {state!.players.some((p) => p.finished)
-                ? "COURSE CLEAR!"
-                : "LET’S TRY AGAIN"}
-            </span>
+            <span className="sh-tag">RACE {state!.level + 1} RESULTS</span>
             <h2>
               {state!.players.some((p) => p.finished)
-                ? "NICE WORK, TEAM."
-                : "ONE MORE RUN."}
+                ? "PHOTO FINISH."
+                : "TIME’S UP."}
             </h2>
+            {results}
             <p>
-              {state!.teamCoins} coins collected together.
+              Finish points decide the championship.
               <br />
-              {state!.players.some((p) => p.finished)
-                ? "The next world is just ahead."
-                : "Your scores stay. The course resets."}
+              Coins break a tie. DNF earns no finish points.
             </p>
-            <small>Continuing in {seconds}s</small>
+            <small>
+              {state!.level === 2 ? "Final standings" : "Next course"} in{" "}
+              {seconds}s
+            </small>
           </section>
         )}
         {phase === "over" && (
           <section className="sh-panel">
             <span className="sh-tag">
               {state!.outcome === "won"
-                ? "ADVENTURE COMPLETE"
-                : state!.outcome === "timeout"
-                  ? "TIME FOR A BREAK"
-                  : "ADVENTURE ENDED"}
+                ? "CHAMPIONSHIP COMPLETE"
+                : "RACE ENDED"}
             </span>
             <h2>
-              {state!.outcome === "won" ? "SUPER FRIENDS." : "UNTIL NEXT TIME."}
+              {state!.outcome === "won"
+                ? tied.length > 1
+                  ? "SHARED VICTORY!"
+                  : champion?.id === selfId
+                    ? "YOU WIN!"
+                    : `${champion?.name ?? "RACER"} WINS!`
+                : "UNTIL NEXT TIME."}
             </h2>
-            <div className="sh-podium">
-              {[...state!.players]
-                .sort((a, b) => b.score - a.score)
-                .map((p) => (
-                  <div key={p.id}>
-                    <Portrait character={p.character} />
-                    <b>{p.name}</b>
-                    <span>
-                      {p.score} pts · {p.coins} coins
-                    </span>
-                  </div>
-                ))}
-            </div>
+            {results}
+            <p>Most race points wins. Coins break ties.</p>
             <button
               className="sh-primary"
               onClick={() => void start()}
               disabled={busy || !connected}
             >
-              PLAY AGAIN
+              RACE AGAIN
             </button>
             <button className="sh-link" onClick={onBack}>
               ALL GAMES
@@ -515,13 +629,23 @@ export default function Platformer({
         )}
         {phase === "play" && !me && (
           <div className="sh-watch">
-            <span>Your friends are exploring.</span>
+            <span>The race is underway. Join at the start line.</span>
             <button onClick={onJoin}>JOIN THEM →</button>
           </div>
         )}
+        {phase === "play" &&
+          me &&
+          !me.finished &&
+          state!.players.some((p) => p.finished) && (
+            <div className="sh-watch">
+              FINAL SPRINT · {seconds}s to reach the flag!
+            </div>
+          )}
         {phase === "play" && me?.finished && (
           <div className="sh-watch">
-            COURSE CLEAR! Watching your friends finish.
+            FINISHED #{me?.place || rank} · +
+            {PLACE_POINTS[(me?.place || rank) - 1] ?? 1} POINTS · Watching the
+            chase.
           </div>
         )}
       </main>
