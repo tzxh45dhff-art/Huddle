@@ -367,6 +367,10 @@
       /* Not a title: an advert, a trailer on a browse page, nothing loaded.
          Stand down rather than hold the room to it. */
       if (!next.ready) return
+      if (window.__huddleMatchesRoom && !window.__huddleMatchesRoom(room)) {
+        reported = { paused: null, position: 0, at: 0 }
+        return
+      }
 
       /* The player can reset the rate on its own — a new source, its own UI,
          an advert ending. Believing our last request would mean never asking
@@ -417,6 +421,7 @@
       if (room === null && performance.now() - askedAt > 5000) askForRoom(titleKey)
 
       if (!player || !player.ready || !room || !room.item) return
+      if (window.__huddleMatchesRoom && !window.__huddleMatchesRoom(room)) return
 
       /* The room is paused, or nothing is on. */
       if (!room.playing) {

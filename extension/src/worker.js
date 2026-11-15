@@ -54,6 +54,7 @@ async function load() {
  * is on screen. A tab that is not watching anything simply ignores the push.
  */
 const WATCHABLE = [
+  'https://*.hotstar.com/*',
   '*://*.netflix.com/*',
   '*://*.primevideo.com/*',
   '*://*.amazon.com/gp/video/*',
@@ -167,7 +168,7 @@ function disconnect() {
  * extension tab, the queue list) treats it exactly the same either way — the
  * page just supplies a truer title than a person guessing from a bare URL.
  */
-async function announce(title, url) {
+async function announce(title, url, position) {
   if (!config.server || !config.token || !config.roomId) {
     throw new Error('Not connected — set up the extension from its popup first.')
   }
@@ -189,7 +190,10 @@ async function announce(title, url) {
 
   /* Same event the app's own "play now" sends — the room does not know or
      care that this came from a tab instead of a click. */
-  socket?.emit('watch:load', { roomId: config.roomId, itemId })
+  socket?.emit('watch:load', {
+    roomId: config.roomId, itemId,
+    position: Number.isFinite(position) ? Math.max(0, position) : 0,
+  })
 }
 
 /** Turn a room code into the id every socket event is keyed on. */
@@ -214,7 +218,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   ;(async () => {
     if (message?.kind === 'announce') {
       try {
-        await announce(String(message.title ?? '').trim() || 'Untitled', String(message.url ?? ''))
+        await announce(String(message.title ?? '').trim() || 'Untitled', String(message.url ?? ''), message.position)
         respond({ ok: true })
       } catch (error) {
         respond({ ok: false, error: error?.message ?? String(error) })

@@ -52,7 +52,7 @@
     return (
       document.title
         /* Each site suffixes its own name; neither belongs in a room's queue. */
-        .replace(/\s*[-|]\s*(Netflix|Prime Video)\s*$/i, '')
+        .replace(/\s*[-|]\s*(Netflix|Prime Video|JioHotstar|Disney\+ Hotstar)\s*$/i, '')
         .replace(/^\s*Prime Video\s*[-|:]\s*/i, '')
         .trim() || 'This title'
     )
@@ -111,6 +111,7 @@
       </style>
       <div class="panel" id="panel">
         <div class="row"><div class="label">Status</div><div class="value" id="status">—</div></div>
+        <a id="joinTitle" style="display:none;color:#fff;margin-bottom:12px;" rel="noopener noreferrer">Open the room’s video</a>
         <div class="row" id="idleRow">
           <div class="label">Watch this together</div>
           <div id="onTitle">
@@ -141,6 +142,7 @@
       pillText: root.getElementById('pillText'),
       status: root.getElementById('status'),
       idleRow: root.getElementById('idleRow'),
+      joinTitle: root.getElementById('joinTitle'),
       followingRow: root.getElementById('followingRow'),
       onTitle: root.getElementById('onTitle'),
       offTitleHint: root.getElementById('offTitleHint'),
@@ -156,7 +158,8 @@
 
   function mount() {
     const el = buildPanel()
-    let open = false
+    let open = true
+    el.panel.classList.toggle('open', true)
     let busy = false
 
     el.pill.addEventListener('click', () => {
@@ -170,7 +173,7 @@
       el.err.style.display = 'none'
       const title = el.detectedTitle.textContent || cleanTitle()
       const result = await chrome.runtime
-        .sendMessage({ kind: 'announce', title, url: location.href })
+        .sendMessage({ kind: 'announce', title, url: location.href, position: latest.player?.position })
         .catch((error) => ({ ok: false, error: error?.message ?? String(error) }))
       busy = false
       if (!result?.ok) {
@@ -225,7 +228,7 @@
       const onWatchPage = Boolean(player?.ready)
 
       el.dot.className = 'dot' + (connected ? ' on' : '')
-      el.pillText.textContent = connected ? 'Huddle · in sync' : 'Huddle'
+      el.pillText.textContent = connected ? 'Huddle · connected' : 'Huddle'
       el.status.textContent = connected
         ? `Connected · offset ${Math.round(offset)}ms`
         : !heard
@@ -234,7 +237,10 @@
             ? `${status} — the room's server is not answering.`
             : 'Not set up yet. Open your Huddle room in a tab.'
 
-      const hasRoomItem = Boolean(room?.item)
+      const hasRoomItem = Boolean(room?.item) && (window.__huddleMatchesRoom ? window.__huddleMatchesRoom(room) : true)
+      const roomUrl = window.__huddleRoomUrl?.(room)
+      el.joinTitle.style.display = roomUrl && !hasRoomItem ? 'block' : 'none'
+      el.joinTitle.href = roomUrl || '#'
       el.idleRow.style.display = hasRoomItem ? 'none' : 'block'
       el.followingRow.style.display = hasRoomItem ? 'block' : 'none'
 

@@ -10,7 +10,7 @@ export function StreamingSetup() {
 
   return (
     <div className="rounded-card border border-white/12 bg-white/[0.03] px-5 py-5">
-      <h3 className="mb-3 font-display text-lg font-semibold text-chalk">Netflix and Prime Video</h3>
+      <h3 className="mb-3 font-display text-lg font-semibold text-chalk">Watch with your streaming account</h3>
       <p className="flex items-center gap-2 text-[0.8rem] font-semibold text-chalk">
         <span
           aria-hidden
@@ -26,34 +26,16 @@ export function StreamingSetup() {
           : 'Extension not detected in this browser'}
       </p>
 
+      <div className="mt-4 flex flex-wrap gap-2">
+        <a className="watch-secondary" href="https://www.primevideo.com" target="_blank" rel="noopener noreferrer">Open Prime Video</a>
+        <a className="watch-secondary" href="https://www.hotstar.com/in" target="_blank" rel="noopener noreferrer">Open JioHotstar · Beta</a>
+      </div>
+      <p className="mt-3 text-sm text-mist">Sign in to the service, play a film or episode, then choose “Start the room on this” in the Huddle panel. Friends can open the shared title from this room. Each viewer needs access to the title.</p>
+      <p className="mt-2 text-xs text-dusk">JioHotstar is experimental on desktop. Live sports and ad-supported playback still need verification.</p>
       {installed && !outdated ? (
-        <>
-          <p className="mt-3 text-[0.85rem] leading-relaxed text-mist">
-            Open the title on{' '}
-            <a
-              href="https://www.netflix.com"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-chalk underline decoration-white/30 underline-offset-2 hover:decoration-white"
-            >
-              netflix.com
-            </a>{' '}
-            or{' '}
-            <a
-              href="https://www.primevideo.com"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-chalk underline decoration-white/30 underline-offset-2 hover:decoration-white"
-            >
-              primevideo.com
-            </a>{' '}
-            and press <strong className="font-semibold text-chalk">Start the room on this</strong>{' '}
-            in the panel that appears over the player. Ask everyone to open the same title in their account to join the room.
-          </p>
-          <p className="mt-3 text-[0.72rem] leading-relaxed text-dusk">
-            The extension syncs play, pause, and seek across everyone’s tabs.
-          </p>
-        </>
+        <p className="mt-3 text-[0.78rem] leading-relaxed text-dusk">
+          Keep this room open. The extension connects automatically and syncs play, pause, and seek.
+        </p>
       ) : (
         <>
           <p className="mt-3 text-[0.85rem] leading-relaxed text-mist">
@@ -73,7 +55,7 @@ export function StreamingSetup() {
               )
             ) : (
               <>
-                Install the Chrome extension to sync play, pause, and seek in your Netflix or Prime Video tab.
+                Install the Chrome extension to sync play, pause, and seek in your streaming tab.
               </>
             )}
           </p>

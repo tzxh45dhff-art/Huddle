@@ -22,7 +22,7 @@ import vm from 'node:vm'
 const src = readFileSync(new URL('../src/overlay.js', import.meta.url), 'utf8')
 
 const IDS = [
-  'pill', 'panel', 'dot', 'pillText', 'status', 'idleRow', 'followingRow',
+  'joinTitle', 'pill', 'panel', 'dot', 'pillText', 'status', 'idleRow', 'followingRow',
   'onTitle', 'offTitleHint', 'detectedTitle', 'followingTitle', 'announce',
   'resync', 'err', 'statsToggle', 'stats',
 ]
@@ -36,6 +36,8 @@ function mount(options = {}) {
     }]),
   )
 
+  const sent = []
+  let onPlayer = null
   let onRoom = null
   let repaint = null
   const shadow = { innerHTML: '', getElementById: (id) => els[id] ?? null }
@@ -59,13 +61,13 @@ function mount(options = {}) {
     location: { href: 'https://www.primevideo.com/detail/B0X/ref=dv', pathname: '/detail/B0X/ref=dv' },
     chrome: {
       runtime: {
-        sendMessage: async () => ({ ok: true }),
+        sendMessage: async (message) => { sent.push(message); return { ok: true } },
         onMessage: { addListener: (fn) => (onRoom = fn) },
       },
     },
   }
   sandbox.window = {
-    addEventListener() {},
+    addEventListener(type, fn) { if (type === 'message') onPlayer = fn },
     __huddleResync() {},
     __huddleStats: options.stats ? () => options.stats : undefined,
   }
@@ -75,7 +77,8 @@ function mount(options = {}) {
   vm.runInContext(src, sandbox)
 
   return {
-    els,
+    els, sent,
+    player: (position) => onPlayer({ source: sandbox.window, data: { channel: 'huddle', kind: 'state', ready: true, position } }),
     tell: (m) => {
       onRoom?.(m)
       repaint?.()
@@ -108,7 +111,7 @@ const check = (n, p, d = '') => R.push({ n, p, d })
     /Connected/.test(o.els.status.textContent),
     o.els.status.textContent,
   )
-  check('  and the pill agrees', o.els.pillText.textContent === 'Huddle · in sync', o.els.pillText.textContent)
+  check('  and the pill agrees', o.els.pillText.textContent === 'Huddle · connected', o.els.pillText.textContent)
 }
 
 {
@@ -184,6 +187,13 @@ const check = (n, p, d = '') => R.push({ n, p, d })
   refused.tell({ kind: 'room', snapshot: { item: { id: 'i', title: 'T' }, playing: true }, offset: 40, status: 'connected' })
   refused.openStats()
   check('a player refusing the rate says so', /refused/.test(refused.els.stats.innerHTML), refused.els.stats.innerHTML)
+}
+
+{
+  const panel = mount()
+  panel.player(1234.5)
+  await panel.els.announce._click()
+  check('starting a room carries the current playback position', panel.sent.some(m => m.kind === 'announce' && m.position === 1234.5))
 }
 
 let bad = 0

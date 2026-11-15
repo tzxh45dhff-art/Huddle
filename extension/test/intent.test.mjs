@@ -68,6 +68,7 @@ function bootSync(siteOptions = {}) {
   sandbox.window.__huddleStartSync(siteOptions)
 
   const api = {
+    matchRoom: (matches) => { sandbox.window.__huddleMatchesRoom = () => matches },
     get clock() {
       return clock
     },
@@ -414,6 +415,24 @@ const check = (name, pass, detail = '') => R.push({ name, pass, detail })
     s.commands.length === 0,
     JSON.stringify(s.commands),
   )
+}
+
+// A different title must neither control the room nor follow its timeline.
+{
+  const s = bootSync()
+  s.matchRoom(false)
+  s.room(s.snap({ position: 900 }))
+  s.push({ position: 10, paused: false })
+  s.advance(6000)
+  s.push({ position: 16, paused: false })
+  s.push({ position: 16, paused: true })
+  s.tick()
+  check('a different title cannot pause or seek the room', s.sent.length === 0)
+  check('a different title is never moved by room sync', s.commands.length === 0)
+  s.matchRoom(true)
+  s.push({ position: 16, paused: true })
+  s.tick()
+  check('opening the shared title resumes sync', s.commands.some(c => c.command === 'play'))
 }
 
 let bad = 0

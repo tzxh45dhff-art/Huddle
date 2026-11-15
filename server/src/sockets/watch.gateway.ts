@@ -283,7 +283,10 @@ export function attachWatchGateway(io: Server) {
 
       io.to(stageRoom(roomId)).emit(
         'watch:state',
-        watch.apply(roomId, self, { action: 'load', item: await toItemWithTracks(row) }),
+        watch.apply(roomId, self, {
+          action: 'load', item: await toItemWithTracks(row),
+          position: numberFrom(raw, 'position'),
+        }),
       )
     })
 
