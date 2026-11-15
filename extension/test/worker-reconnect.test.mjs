@@ -12,7 +12,7 @@ test('disconnected controls are not buffered and stale snapshots are cleared', a
     tabs: { query: async () => [{ id: 1 }], sendMessage: async (_, value) => { pushed.push(value) } },
     runtime: { onMessage: { addListener: fn => { message = fn } } },
   }
-  const context = vm.createContext({ chrome, io: () => socket, setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {}, Date, console, fetch: async () => { throw new Error('Unexpected request') } })
+  const context = vm.createContext({ chrome, io: () => socket, setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {}, Date, console, fetch: async () => ({ ok: true, json: async () => ({ item: { id: 'fixture-item' } }) }) })
   const source = readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8').replace("import { io } from './socket-lib.js'", '')
   vm.runInContext(source, context)
   await new Promise(resolve => setImmediate(resolve))
@@ -31,4 +31,7 @@ test('disconnected controls are not buffered and stale snapshots are cleared', a
   socket.connected = true
   assert.equal((await send({ kind: 'control', control: { action: 'pause', position: 1200 } })).ok, true)
   assert.equal(sent.at(-1)[0], 'watch:control')
+  assert.equal((await send({ kind: 'announce', title: 'Fixture', url: 'https://example.test', position: 1234.5 })).ok, true)
+  assert.equal(sent.at(-1)[0], 'watch:load')
+  assert.equal(sent.at(-1)[1].position, 1234.5)
 })
