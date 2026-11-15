@@ -110,7 +110,9 @@ function connect() {
     return
   }
 
+  snapshot = null
   status = 'connecting'
+  void broadcast()
   socket = io(config.server, {
     path: '/socket.io',
     transports: ['websocket'],
@@ -135,6 +137,8 @@ function connect() {
 
   socket.on('disconnect', () => {
     status = 'disconnected'
+    snapshot = null
+    void broadcast()
   })
   socket.on('connect_error', (error) => {
     status = `refused: ${error?.message ?? 'unknown'}`
@@ -169,6 +173,7 @@ function disconnect() {
  * page just supplies a truer title than a person guessing from a bare URL.
  */
 async function announce(title, url, position) {
+  if (!socket?.connected) throw new Error('Connection lost — wait for Huddle to reconnect.')
   if (!config.server || !config.token || !config.roomId) {
     throw new Error('Not connected — set up the extension from its popup first.')
   }
@@ -187,6 +192,8 @@ async function announce(title, url, position) {
 
   const itemId = body?.item?.id
   if (!itemId) throw new Error('The server did not say what it added.')
+
+  if (!socket?.connected) throw new Error('Connection lost — the title was queued but not started.')
 
   /* Same event the app's own "play now" sends — the room does not know or
      care that this came from a tab instead of a click. */
@@ -227,6 +234,10 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     }
 
     if (message?.kind === 'control') {
+      if (!socket?.connected) {
+        respond({ ok: false, error: 'Connection lost — controls were not sent.' })
+        return
+      }
       /* The room decides what happens; this only asks. The echo comes back as
          a `watch:state` like anybody else's, which is what keeps one tab from
          being a special case. */
