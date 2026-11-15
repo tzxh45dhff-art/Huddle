@@ -43,33 +43,30 @@ export function ExternalBeacon({
   const counting = playing && now < 3
 
   return (
-    <div className="absolute inset-0 grid place-items-center bg-[radial-gradient(120%_100%_at_50%_0%,var(--color-grade-violet),var(--color-void)_70%)] p-8">
-      <div className="flex max-w-lg flex-col items-center text-center">
-        <span className="grid size-14 place-items-center rounded-full bg-signal/15 text-signal-bright ring-1 ring-inset ring-signal/30">
+    <div data-lenis-prevent className="absolute inset-0 flex flex-col items-center overflow-auto bg-[radial-gradient(ellipse_at_top,#492630,#17151a_68%)] p-4 sm:p-7">
+      <div className="my-auto flex w-full min-w-0 max-w-lg shrink-0 flex-col items-center text-center">
+        <span className="hidden size-12 sm:grid place-items-center rounded-full bg-signal/15 text-signal-bright ring-1 ring-inset ring-signal/30">
           <MonitorPlay aria-hidden className="size-6" />
         </span>
 
-        <p className="mt-5 text-[0.7rem] uppercase tracking-[0.2em] text-dusk">
+        <p className="text-[0.7rem] sm:mt-5 uppercase tracking-[0.2em] text-dusk">
           Synced clock · plays in your own tab
         </p>
-        <h3 className="mt-2 font-display text-[clamp(1.3rem,3vw,2rem)] font-semibold leading-tight tracking-[-0.03em] text-chalk">
-          {item.title}
-        </h3>
 
         {counting ? (
           <p
             key={Math.ceil(3 - now)}
-            className="mt-8 animate-[fade-up_0.4s_ease-out] font-display text-[5rem] font-semibold leading-none text-signal-bright"
+            className="mt-4 sm:mt-8 animate-[fade-up_0.4s_ease-out] font-display text-[5rem] font-semibold leading-none text-signal-bright"
           >
             {Math.max(1, Math.ceil(3 - now))}
           </p>
         ) : (
-          <p className="mt-8 font-mono text-[3rem] font-semibold leading-none tabular-nums text-chalk">
+          <p className="mt-4 sm:mt-8 font-mono text-[3rem] font-semibold leading-none tabular-nums text-chalk">
             {formatTime(Math.max(0, now))}
           </p>
         )}
 
-        <p className="mt-6 max-w-md text-[0.9rem] leading-relaxed text-mist">
+        <p className="mt-3 sm:mt-6 max-w-md text-[0.9rem] leading-relaxed text-mist">
           {playing
             ? 'The room is counting together. Match this timestamp in your player and you are all on the same frame.'
             : 'Everyone open it in their own tab, then press play here to start the count together.'}
@@ -80,9 +77,9 @@ export function ExternalBeacon({
             href={link}
             target="_blank"
             rel="noreferrer noopener"
-            className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.05] px-4 py-2.5 text-[0.85rem] text-chalk transition-colors duration-300 hover:border-white/30 hover:bg-white/[0.09]"
+            className="mt-3 sm:mt-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.05] px-4 py-2.5 text-[0.85rem] text-chalk transition-colors duration-300 hover:border-white/30 hover:bg-white/[0.09]"
           >
-            Open {item.title}
+            Open in a new tab
             <ExternalLink aria-hidden className="size-3.5" />
           </a>
         )}

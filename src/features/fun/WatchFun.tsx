@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bookmark, Pin, X } from 'lucide-react'
+import { Bookmark, Pin, SmilePlus, X } from 'lucide-react'
 
 import { MOMENT_FACES, REACTIONS, reactionById } from '@/features/fun/catalog'
 import { clock } from '@/features/fun/time'
@@ -50,9 +50,18 @@ export function WatchFun({
   onSeek: (seconds: number) => void
 }) {
   const [sheet, setSheet] = useState<'pin' | 'moments' | null>(null)
+  const [reacting, setReacting] = useState(false)
 
   /* Close a sheet if the film changes underneath it. */
-  useEffect(() => setSheet(null), [item?.id])
+  useEffect(() => {
+    setSheet(null)
+    setReacting(false)
+  }, [item?.id])
+
+  function toggleSheet(next: 'pin' | 'moments') {
+    setReacting(false)
+    setSheet((current) => current === next ? null : next)
+  }
 
   return (
     <>
@@ -63,34 +72,29 @@ export function WatchFun({
       {item && (
         <div
           className={cn(
-            'absolute right-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1.5 transition-opacity duration-500 ease-glass md:right-5',
-            chromeVisible || sheet ? 'opacity-100' : 'pointer-events-none opacity-0',
+            'watch-social absolute right-2 top-2 z-20 transition-opacity duration-300 sm:right-3 sm:top-3',
+            chromeVisible || sheet || reacting ? 'opacity-100' : 'pointer-events-none opacity-0 focus-within:pointer-events-auto focus-within:opacity-100',
           )}
         >
-          <div className="glass-pill-ink flex flex-col items-center gap-0.5 rounded-full p-1.5" role="group" aria-label="React">
-            {REACTIONS.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => onReact(r.id)}
-                aria-label={`React: ${r.label}`}
-                title={r.label}
-                className="grid size-10 place-items-center rounded-full text-[1.35rem] outline-none transition-transform duration-200 hover:scale-[1.18] hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-signal active:scale-90"
-                style={emojiFont}
-              >
-                <span aria-hidden>{r.glyph}</span>
-              </button>
-            ))}
-          </div>
-          <div className="glass-pill-ink flex flex-col items-center gap-0.5 rounded-full p-1.5">
+          <div className="flex gap-0.5 rounded-xl border border-white/15 bg-[#131318eb] p-0.5">
             <button
               type="button"
-              onClick={() => setSheet((s) => (s === 'pin' ? null : 'pin'))}
+              onClick={() => { setSheet(null); setReacting((open) => !open) }}
+              aria-label="React"
+              title="React"
+              aria-expanded={reacting}
+              className="grid size-10 place-items-center rounded-lg text-chalk outline-none hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-signal"
+            >
+              <SmilePlus aria-hidden className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleSheet('pin')}
               aria-expanded={sheet === 'pin'}
               aria-label={`Pin this moment, at ${clock(position)}`}
               title="Pin this moment"
               className={cn(
-                'grid size-10 place-items-center rounded-full text-chalk outline-none transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-signal',
+                'grid size-10 place-items-center rounded-lg text-chalk outline-none transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-signal',
                 sheet === 'pin' && 'bg-signal/25',
               )}
             >
@@ -98,12 +102,12 @@ export function WatchFun({
             </button>
             <button
               type="button"
-              onClick={() => setSheet((s) => (s === 'moments' ? null : 'moments'))}
+              onClick={() => toggleSheet('moments')}
               aria-expanded={sheet === 'moments'}
               aria-label={`Moments in this film: ${moments.length}`}
               title="Moments"
               className={cn(
-                'relative grid size-10 place-items-center rounded-full text-chalk outline-none transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-signal',
+                'relative grid size-10 place-items-center rounded-lg text-chalk outline-none transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-signal',
                 sheet === 'moments' && 'bg-white/15',
               )}
             >
@@ -115,6 +119,19 @@ export function WatchFun({
               )}
             </button>
           </div>
+          {reacting && (
+            <div className="absolute right-0 top-full mt-1 grid grid-cols-4 gap-1 rounded-xl border border-white/15 bg-[#131318f5] p-1"
+              role="group" aria-label="Reactions">
+              {REACTIONS.map((r) => (
+                <button key={r.id} type="button"
+                  onClick={() => { onReact(r.id); setReacting(false) }}
+                  aria-label={`React: ${r.label}`} title={r.label}
+                  className="grid size-10 place-items-center rounded-lg text-xl hover:bg-white/10"
+                  style={emojiFont}
+                ><span aria-hidden>{r.glyph}</span></button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -173,7 +190,7 @@ function Floater({ reaction, mine, reduced }: { reaction: ReactionEvent; mine: b
   if (!def) return null
   return (
     <motion.div
-      className="absolute bottom-24 flex flex-col items-center"
+      className="absolute bottom-16 flex flex-col items-center"
       style={{ left: lane.x }}
       initial={{ opacity: 0, y: 0, scale: 0.4 }}
       animate={
@@ -275,7 +292,8 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
       animate={{ opacity: 1, x: 0, scale: 1 }}
       exit={{ opacity: 0, x: 10 }}
       transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-      className="glass-pill-ink absolute right-16 top-1/2 z-30 w-[min(21rem,calc(100%-6rem))] -translate-y-1/2 rounded-[1.4rem] p-4 shadow-[0_30px_80px_-30px_rgba(0,0,0,.85)] md:right-20"
+      data-lenis-prevent
+      className="absolute right-2 top-14 z-30 max-h-[calc(100%-4rem)] w-[min(21rem,calc(100%-1rem))] overflow-auto rounded-xl border border-white/15 bg-[#19191f] p-4 shadow-2xl sm:right-3"
     >
       <div className="mb-3 flex items-center justify-between">
         <p className="font-display text-[0.95rem] font-semibold text-chalk">{title}</p>
@@ -387,7 +405,7 @@ function MomentsSheet({
           Press the pin when something gets you.
         </p>
       ) : (
-        <ul className="-mx-1 flex max-h-[min(22rem,50vh)] flex-col gap-1 overflow-y-auto px-1">
+        <ul data-lenis-prevent className="-mx-1 flex max-h-[min(22rem,50vh)] flex-col gap-1 overflow-y-auto px-1">
           {moments.map((m) => (
             <li key={m.id} className="group flex items-center gap-2">
               <button

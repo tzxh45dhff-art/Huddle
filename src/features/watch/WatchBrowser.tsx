@@ -1,24 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import { Clapperboard, FolderOpen, ListVideo, Loader2, Search, Upload } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowUpRight, Film, FolderOpen, Link2, ListVideo, Loader2, Play, Search, Upload } from 'lucide-react'
 
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import * as watchApi from '@/features/watch/api'
 import { PosterCard, PosterGrid } from '@/features/watch/PosterCard'
-import type { LibraryEntry, QueueItem, SearchResult } from '@/features/watch/types'
-import type { Queued } from '@/features/watch/SourcePicker'
-import { cn } from '@/lib/utils'
+import { QueuePanel } from '@/features/watch/QueuePanel'
+import { StreamingSetup } from '@/features/watch/StreamingSetup'
+import { formatTime, type LibraryEntry, type QueueItem, type ResolvedSource, type SearchResult, type WatchItem } from '@/features/watch/types'
+import { apiUrl } from '@/lib/config'
 
-const EASE = [0.16, 1, 0.3, 1] as const
+export type WatchSection = 'library' | 'search' | 'streaming' | 'queue'
 
-type View = 'search' | 'library' | 'queue'
-
-const NAV: { id: View; label: string; icon: typeof Search }[] = [
-  { id: 'search', label: 'Search', icon: Search },
-  { id: 'library', label: 'On the server', icon: FolderOpen },
-  { id: 'queue', label: 'Up next', icon: ListVideo },
-]
+const SOURCE_LABELS = { file: 'Server video', youtube: 'YouTube', external: 'Synced countdown' }
 
 function formatBytes(bytes: number) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
@@ -26,522 +19,331 @@ function formatBytes(bytes: number) {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
-/**
- * Choosing what the room watches.
- *
- * The same shape as the music library — a rail, a grid, one scrolling column —
- * because it is the same job: find a thing, then put it on. What differs is
- * what a video needs said about it. There is no artist and no album; there is
- * a channel, a running time, and occasionally the fact that a file on the
- * server is in a container no browser will open.
- *
- * Deliberately not a mirror of the music page. There is no "liked", because
- * nobody keeps a film the way they keep a song, and no suggestions, because
- * the honest basis for those — what this room has played before — is a
- * handful of rows rather than a taste.
- */
-export function WatchBrowser({
-  roomId,
-  canSearch,
-  queue,
-  nowPlayingRef,
-  playing,
-  onQueued,
-  onPlayQueued,
-}: {
-  roomId: string
-  canSearch: boolean
-  queue: QueueItem[]
-  /** The `ref` of what is on, so the grid can mark it. */
-  nowPlayingRef: string | null
-  playing: boolean
-  onQueued: (queued: Queued, playNow: boolean) => void
-  onPlayQueued: (item: QueueItem) => void
-}) {
-  const [view, setView] = useState<View>('search')
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[] | null>(null)
-  const [library, setLibrary] = useState<LibraryEntry[] | null>(null)
-  /** Which file is being asked about, so the confirm is inline rather than a window.confirm. */
-  const [pendingDelete, setPendingDelete] = useState<LibraryEntry | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [progress, setProgress] = useState<number | null>(null)
+function fromLibrary(entry: LibraryEntry): ResolvedSource {
+  return {
+    source: 'file', ref: entry.hls ?? entry.ref, title: entry.title,
+    thumbnail: entry.thumbnail, duration: entry.duration,
+  }
+}
 
-  const filePicker = useRef<HTMLInputElement>(null)
-  const searchField = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (view === 'search') searchField.current?.focus()
-  }, [view])
-
-  /* Read fresh each time it is opened — the folder is the source of truth, and
-     something dropped in a moment ago should already be there. */
-  useEffect(() => {
-    if (view !== 'library') return
-    setBusy(true)
-    watchApi
-      .fetchLibrary(roomId)
-      .then(setLibrary)
-      .catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : 'Could not read the server folder'),
-      )
-      .finally(() => setBusy(false))
-  }, [view, roomId])
-
-  /*
-   * Asking, not doing.
-   *
-   * This removes the file and everything published from it, and there is no
-   * undo behind it — so the click opens a question rather than performing the
-   * deletion. Inline rather than `window.confirm`, which cannot say which file
-   * or that the streamed copy goes with it, and which some mobile browsers
-   * suppress outright.
-   */
-  const removeFile = useCallback((entry: LibraryEntry) => {
-    setError(null)
-    setPendingDelete(entry)
-  }, [])
-
-  const confirmDelete = useCallback(async () => {
-    const entry = pendingDelete
-    if (!entry || deleting) return
-
-    setDeleting(true)
-    setError(null)
-    try {
-      await watchApi.deleteFromLibrary(roomId, entry.file)
-      /* Dropped locally rather than refetched: the answer is already known,
-         and a round trip here would blank the grid for a moment. */
-      setLibrary((current) => current?.filter((item) => item.file !== entry.file) ?? null)
-      setPendingDelete(null)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not delete that file')
-    } finally {
-      setDeleting(false)
-    }
-  }, [pendingDelete, deleting, roomId])
-
-  const add = useCallback(
-    async (item: Parameters<typeof watchApi.addToQueue>[1], playNow: boolean) => {
-      setError(null)
-      try {
-        onQueued(await watchApi.addToQueue(roomId, item), playNow)
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Could not add that')
-      }
-    },
-    [roomId, onQueued],
-  )
-
-  const runSearch = useCallback(async () => {
-    const value = query.trim()
-    if (!value) return
-
-    setBusy(true)
-    setError(null)
-    setResults(null)
-
-    try {
-      const looksLikeLink = /^https?:\/\//i.test(value) || /^[\w-]{11}$/.test(value)
-
-      /* A pasted link is an instruction rather than a question — resolve it
-         and put it on. It is also the only way to reach the platforms that
-         cannot be embedded, which resolve into the room's shared countdown. */
-      if (looksLikeLink) {
-        const resolved = await watchApi.resolveInput(roomId, value)
-        await add(resolved, true)
-        setQuery('')
-        return
-      }
-
-      if (!canSearch) {
-        setError('Search needs a YouTube API key on the server — paste a link instead.')
-        return
-      }
-
-      setResults(await watchApi.searchVideos(roomId, value))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not search')
-    } finally {
-      setBusy(false)
-    }
-  }, [query, roomId, canSearch, add])
-
-  const upload = useCallback(
-    async (file: File | undefined) => {
-      if (!file) return
-      setError(null)
-      setProgress(0)
-      try {
-        await add(await watchApi.uploadVideo(roomId, file, setProgress), true)
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Upload failed')
-      } finally {
-        setProgress(null)
-      }
-    },
-    [roomId, add],
-  )
-
-  const heading = useMemo(() => NAV.find((entry) => entry.id === view)!, [view])
-
+function Empty({ icon: Icon, title, children }: { icon: typeof Film; title: string; children?: React.ReactNode }) {
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <input
-        ref={filePicker}
-        type="file"
-        accept="video/mp4,video/webm,video/ogg,video/quicktime"
-        className="hidden"
-        onChange={(event) => {
-          void upload(event.target.files?.[0])
-          event.target.value = ''
-        }}
-      />
-
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <nav className="flex shrink-0 gap-1 overflow-x-auto px-4 pb-2 pt-1 md:w-52 md:flex-col md:overflow-visible md:px-4 md:pb-6 md:pt-2">
-          {NAV.map((entry) => {
-            const Icon = entry.icon
-            const active = view === entry.id
-            return (
-              <button
-                key={entry.id}
-                type="button"
-                onClick={() => setView(entry.id)}
-                className={cn(
-                  'relative flex min-h-11 shrink-0 items-center gap-2.5 rounded-full px-3.5 py-2 text-left outline-none transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal md:min-h-0 md:rounded-xl',
-                  active ? 'text-chalk' : 'text-mist hover:text-chalk',
-                )}
-              >
-                {/* One moving marker rather than a class that blinks between
-                    items — the same treatment the music rail uses. */}
-                {active && (
-                  <motion.span
-                    layoutId="watch-nav-active"
-                    className="absolute inset-0 rounded-full bg-white/[0.09] ring-1 ring-inset ring-white/10 md:rounded-xl"
-                    transition={{ duration: 0.4, ease: EASE }}
-                  />
-                )}
-                <Icon aria-hidden className="relative size-4 shrink-0" />
-                <span className="relative text-[0.85rem] font-medium">{entry.label}</span>
-                {entry.id === 'queue' && queue.length > 0 && (
-                  <span className="relative ml-auto text-[0.72rem] tabular-nums text-dusk">
-                    {queue.length}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-
-          <div className="hidden md:mt-auto md:block md:px-1">
-            <button
-              type="button"
-              onClick={() => filePicker.current?.click()}
-              disabled={progress !== null}
-              className="flex w-full items-center gap-2.5 rounded-xl border border-dashed border-white/12 px-3.5 py-2.5 text-left text-[0.8rem] text-mist outline-none transition-colors hover:border-white/25 hover:text-chalk focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-50"
-            >
-              {progress !== null ? (
-                <>
-                  <Loader2 aria-hidden className="size-4 shrink-0 animate-spin" />
-                  <span>{Math.round(progress * 100)}%</span>
-                </>
-              ) : (
-                <>
-                  <Upload aria-hidden className="size-4 shrink-0" />
-                  <span>Upload a video</span>
-                </>
-              )}
-            </button>
-          </div>
-        </nav>
-
-        <div className="flex min-h-0 flex-1 flex-col px-4 pb-2 md:px-6">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={view}
-              className="flex min-h-0 flex-1 flex-col"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.3, ease: EASE }}
-            >
-              <h2 className="shrink-0 pb-3 font-display text-[clamp(1.5rem,3vw,2rem)] font-semibold tracking-[-0.03em] text-chalk">
-                {heading.label}
-              </h2>
-
-              {view === 'search' && (
-                <form
-                  className="shrink-0 pb-3"
-                  onSubmit={(event) => {
-                    event.preventDefault()
-                    void runSearch()
-                  }}
-                >
-                  <div className="relative">
-                    <Search
-                      aria-hidden
-                      className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-dusk"
-                    />
-                    <input
-                      ref={searchField}
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={
-                        canSearch
-                          ? 'Search YouTube, or paste any link'
-                          : 'Paste a YouTube link, or a direct video URL'
-                      }
-                      spellCheck={false}
-                      className="h-12 w-full rounded-full border border-white/10 bg-white/[0.04] pl-11 pr-4 text-[0.9rem] text-chalk outline-none transition-colors placeholder:text-dusk focus:border-white/25 focus:bg-white/[0.06]"
-                    />
-                    {busy && (
-                      <Loader2
-                        aria-hidden
-                        className="absolute right-4 top-1/2 size-4 -translate-y-1/2 animate-spin text-mist"
-                      />
-                    )}
-                  </div>
-                </form>
-              )}
-
-              {error && (
-                <p
-                  role="alert"
-                  className="mb-3 shrink-0 rounded-xl border border-signal/25 bg-signal/[0.08] px-4 py-2.5 text-[0.8rem] text-signal-bright"
-                >
-                  {error}
-                </p>
-              )}
-
-              <ScrollArea className="min-h-0 flex-1" data-lenis-prevent>
-                <div className="pb-6 pr-3">
-                  {view === 'search' ? (
-                    results === null ? (
-                      <Empty
-                        title="Find something to watch"
-                        body="Search YouTube, paste a link, or drop a file into the server folder and pick it from there."
-                      />
-                    ) : results.length === 0 ? (
-                      <Empty title="Nothing found" body="Try a different set of words." />
-                    ) : (
-                      <PosterGrid>
-                        {results.map((result) => (
-                          <PosterCard
-                            key={result.id}
-                            item={{
-                              source: 'youtube',
-                              ref: result.id,
-                              title: result.title,
-                              subtitle: result.channel,
-                              thumbnail: result.thumbnail,
-                            }}
-                            current={nowPlayingRef === result.id}
-                            playing={playing}
-                            onPlay={() =>
-                              void add(
-                                {
-                                  source: 'youtube',
-                                  ref: result.id,
-                                  title: result.title,
-                                  duration: null,
-                                  thumbnail: result.thumbnail,
-                                },
-                                true,
-                              )
-                            }
-                            onQueue={() =>
-                              void add(
-                                {
-                                  source: 'youtube',
-                                  ref: result.id,
-                                  title: result.title,
-                                  duration: null,
-                                  thumbnail: result.thumbnail,
-                                },
-                                false,
-                              )
-                            }
-                          />
-                        ))}
-                      </PosterGrid>
-                    )
-                  ) : view === 'library' ? (
-                    busy && !library ? (
-                      <div className="grid place-items-center py-14">
-                        <Loader2 aria-hidden className="size-5 animate-spin text-mist" />
-                      </div>
-                    ) : !library || library.length === 0 ? (
-                      <Empty
-                        title="Nothing in the uploads folder"
-                        body="Drop a video into server/uploads/ on the machine running the backend and it shows up here."
-                      />
-                    ) : (
-                      <>
-                        <PosterGrid>
-                          {library.map((entry) => (
-                            <PosterCard
-                              key={entry.file}
-                              item={{
-                                source: 'file',
-                                ref: entry.hls ?? entry.ref,
-                                title: entry.title,
-                                subtitle: entry.hls
-                                  ? `${formatBytes(entry.bytes)} · streaming`
-                                  : formatBytes(entry.bytes),
-                                thumbnail: entry.thumbnail,
-                                duration: entry.duration,
-                                playable: entry.playable,
-                                reason: !entry.playable
-                                  ? "Browsers can't play this container"
-                                  : !entry.fastStart && !entry.hls
-                                    ? 'Slow to start — needs remuxing'
-                                    : null,
-                              }}
-                              current={nowPlayingRef === (entry.hls ?? entry.ref)}
-                              playing={playing}
-                              onPlay={() =>
-                                void add(
-                                  {
-                                    source: 'file',
-                                    ref: entry.hls ?? entry.ref,
-                                    title: entry.title,
-                                    duration: entry.duration,
-                                    thumbnail: entry.thumbnail,
-                                  },
-                                  true,
-                                )
-                              }
-                              onQueue={() =>
-                                void add(
-                                  {
-                                    source: 'file',
-                                    ref: entry.hls ?? entry.ref,
-                                    title: entry.title,
-                                    duration: entry.duration,
-                                    thumbnail: entry.thumbnail,
-                                  },
-                                  false,
-                                )
-                              }
-                              onDelete={() => void removeFile(entry)}
-                            />
-                          ))}
-                        </PosterGrid>
-
-                        {library.some((entry) => !entry.playable) && (
-                          <p className="mt-3 px-1 text-[0.7rem] leading-relaxed text-dusk">
-                            Greyed-out files are containers no browser will play (.mkv, .avi).
-                            Convert one with{' '}
-                            <code className="font-mono text-[0.68rem] text-mist">
-                              ffmpeg -i in.mkv -c:v copy -c:a aac out.mp4
-                            </code>{' '}
-                            and it appears here ready to go.
-                          </p>
-                        )}
-                      </>
-                    )
-                  ) : queue.length === 0 ? (
-                    <Empty
-                      title="Nothing lined up"
-                      body="Whatever you add plays for the whole room at once."
-                    />
-                  ) : (
-                    <PosterGrid>
-                      {queue.map((item) => (
-                        <PosterCard
-                          key={item.id}
-                          item={{
-                            source: item.source,
-                            ref: item.ref,
-                            title: item.title,
-                            subtitle: item.addedBy.name,
-                            thumbnail: item.thumbnail,
-                            duration: item.duration,
-                          }}
-                          current={nowPlayingRef === item.ref}
-                          playing={playing}
-                          onPlay={() => onPlayQueued(item)}
-                        />
-                      ))}
-                    </PosterGrid>
-                  )}
-                </div>
-              </ScrollArea>
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {pendingDelete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="absolute inset-0 z-50 grid place-items-center bg-void/70 p-5 backdrop-blur-sm"
-            onClick={() => !deleting && setPendingDelete(null)}
-          >
-            <motion.div
-              role="alertdialog"
-              aria-modal="true"
-              aria-label={`Delete ${pendingDelete.title}`}
-              initial={{ opacity: 0, scale: 0.96, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 8 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              onClick={(event) => event.stopPropagation()}
-              className="w-full max-w-sm rounded-2xl border border-white/12 bg-[rgb(16_16_20/0.97)] p-5 shadow-[0_30px_80px_-24px_rgb(0_0_0/0.9)]"
-            >
-              <h3 className="font-display text-[1.02rem] font-semibold tracking-[-0.015em] text-chalk">
-                Delete this from the server?
-              </h3>
-              <p className="mt-2 break-words text-[0.85rem] leading-relaxed text-mist">
-                <span className="text-chalk">{pendingDelete.title}</span> will be removed from the
-                uploads folder
-                {pendingDelete.hls ? ', along with the streamed copy on the CDN' : ''}. This cannot
-                be undone.
-              </p>
-
-              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  flat
-                  onClick={() => setPendingDelete(null)}
-                  disabled={deleting}
-                >
-                  Keep it
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  flat
-                  onClick={() => void confirmDelete()}
-                  disabled={deleting}
-                  className="border-rose-400/40 text-rose-200 hover:border-rose-400/70 hover:text-rose-100"
-                >
-                  {deleting ? 'Deleting…' : 'Delete'}
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="watch-empty">
+      <Icon aria-hidden />
+      <div><p>{title}</p>{children && <div>{children}</div>}</div>
     </div>
   )
 }
 
-function Empty({ title, body }: { title: string; body: string }) {
+export function WatchBrowser({
+  roomId, section, visible, canSearch, queue, current, playing,
+  ready, onSection, onQueued, onQueueChange, onPlayQueued, onResume,
+}: {
+  roomId: string
+  section: WatchSection
+  visible: boolean
+  canSearch: boolean
+  queue: QueueItem[]
+  current: WatchItem | null
+  playing: boolean
+  ready: boolean
+  onSection: (section: WatchSection) => void
+  onQueued: (queued: watchApi.Queued, playNow: boolean) => void
+  onQueueChange: (items: QueueItem[]) => void
+  onPlayQueued: (item: QueueItem) => void
+  onResume: () => void
+}) {
+  const [library, setLibrary] = useState<LibraryEntry[] | null>(null)
+  const [libraryError, setLibraryError] = useState<string | null>(null)
+  const [refresh, setRefresh] = useState(0)
+  const [query, setQuery] = useState('')
+  const [libraryFilter, setLibraryFilter] = useState('')
+  const [streamInput, setStreamInput] = useState('')
+  const [results, setResults] = useState<SearchResult[] | null>(null)
+  const [pending, setPending] = useState<ResolvedSource | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<LibraryEntry | null>(null)
+  const [action, setAction] = useState<string | null>(null)
+  const inFlight = useRef(false)
+  const [progress, setProgress] = useState<number | null>(null)
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null)
+  const filePicker = useRef<HTMLInputElement>(null)
+  const scroll = useRef<HTMLDivElement>(null)
+  const deleteDialog = useRef<HTMLDialogElement>(null)
+  const deleteTrigger = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!visible || section !== 'library') return
+    let active = true
+    setLibraryError(null)
+    watchApi.fetchLibrary(roomId)
+      .then((items) => { if (active) setLibrary(items) })
+      .catch((error: unknown) => {
+        if (active) setLibraryError(error instanceof Error ? error.message : 'Could not load the server library.')
+      })
+    return () => { active = false }
+  }, [roomId, section, visible, refresh])
+
+  useEffect(() => {
+    scroll.current?.scrollTo(0, 0)
+    setMessage(null)
+    setPending(null)
+  }, [section])
+
+  useEffect(() => {
+    if (pendingDelete) deleteDialog.current?.showModal()
+    else if (deleteDialog.current?.open) {
+      deleteDialog.current.close()
+      deleteTrigger.current?.focus()
+    }
+  }, [pendingDelete])
+
+  async function perform(label: string, task: () => Promise<void>, fallback: string) {
+    if (inFlight.current) return
+    inFlight.current = true
+    setAction(label)
+    setMessage(null)
+    try {
+      await task()
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : fallback, error: true })
+    } finally {
+      inFlight.current = false
+      setAction(null)
+    }
+  }
+
+  async function add(item: ResolvedSource, playNow: boolean) {
+    const queued = await watchApi.addToQueue(roomId, item)
+    onQueued(queued, playNow)
+    if (!playNow) setMessage({ text: `Added to Up next: ${item.title}`, error: false })
+  }
+
+  function choose(item: ResolvedSource, playNow: boolean) {
+    if (playNow && current?.ref === item.ref && current.source === item.source) {
+      onResume()
+      return
+    }
+    void perform(item.ref, () => add(item, playNow), 'Could not add this video.')
+  }
+
+  function submit(value: string, mode: 'search' | 'streaming') {
+    value = value.trim()
+    if (!value) return
+    const resolve = mode === 'streaming' || /^https?:\/\//i.test(value) || /^[\w-]{11}$/.test(value)
+    void perform(mode, async () => {
+      setPending(null)
+      if (resolve) {
+        const item = await watchApi.resolveInput(roomId, value)
+        if (item.note) setPending(item)
+        else await add(item, true)
+      } else {
+        if (!canSearch) throw new Error('Paste a YouTube or direct video link to continue.')
+        setResults(null)
+        setResults(await watchApi.searchVideos(roomId, value))
+      }
+    }, 'Could not open this video.')
+  }
+
+  function upload(file: File | undefined) {
+    if (!file) return
+    void perform('upload', async () => {
+      setProgress(0)
+      try {
+        await add(await watchApi.uploadVideo(roomId, file, setProgress), true)
+        setRefresh((value) => value + 1)
+      } finally {
+        setProgress(null)
+      }
+    }, 'Could not upload this video.')
+  }
+
+  const next = queue[queue.findIndex((entry) => entry.id === current?.id) + 1]
+  const featuredFile = library?.find((entry) => entry.playable && entry.thumbnail)
+    ?? library?.find((entry) => entry.playable)
+  const featured = current ?? next ?? (featuredFile ? fromLibrary(featuredFile) : null)
+  const filtered = library?.filter((entry) => entry.title.toLowerCase().includes(libraryFilter.trim().toLowerCase()))
+  const disabled = action !== null || !ready
+
+  function renderCard(item: ResolvedSource, details: { subtitle?: string; playable?: boolean; reason?: string } = {}, entry?: LibraryEntry) {
+    return (
+      <PosterCard
+        key={entry?.file ?? item.ref}
+        item={{ ...item, ...details }}
+        current={current?.source === item.source && current.ref === item.ref}
+        playing={playing}
+        busy={disabled}
+        onPlay={() => choose(item, true)}
+        onQueue={() => choose(item, false)}
+        onDelete={entry && (() => {
+          deleteTrigger.current = document.activeElement as HTMLElement | null
+          setPendingDelete(entry)
+        })}
+      />
+    )
+  }
+
   return (
-    <div className="flex flex-col items-center px-6 py-14 text-center">
-      <span className="grid size-12 place-items-center rounded-2xl bg-white/[0.05] text-mist ring-1 ring-inset ring-white/10">
-        <Clapperboard aria-hidden className="size-5" />
-      </span>
-      <p className="mt-4 font-display text-[1.05rem] font-semibold text-chalk">{title}</p>
-      <p className="mt-1.5 max-w-sm text-[0.84rem] leading-relaxed text-mist">{body}</p>
+    <div ref={scroll} hidden={!visible} className="watch-catalog" data-lenis-prevent>
+      <input ref={filePicker} type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime" hidden
+        onChange={(event) => { upload(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
+
+      {section === 'library' && (
+        <section className="watch-feature" aria-label={current ? 'Now playing' : 'Watch'}>
+          {featured?.thumbnail && <img className="watch-feature-art" src={apiUrl(featured.thumbnail)} alt="" />}
+          <div className="watch-feature-copy">
+            <div className="watch-feature-label">
+              <span className={current && playing ? 'is-live' : ''} />
+              {current ? (playing ? 'Now playing' : 'Paused in the room') : next ? 'Up next' : featured ? 'From the server' : 'Watch together'}
+            </div>
+            <h1 title={featured?.title}>{featured?.title ?? 'Pick something to watch'}</h1>
+            <p>{featured ? [SOURCE_LABELS[featured.source], featured.duration ? formatTime(featured.duration) : null].filter(Boolean).join(' · ') : 'Choose a server video, search YouTube, or open a streaming link.'}</p>
+            <div className="watch-feature-actions">
+              {featured ? (
+                <button type="button" className="watch-primary" disabled={!current && disabled} onClick={() => {
+                  if (current) onResume()
+                  else if (next) onPlayQueued(next)
+                  else choose(featured, true)
+                }}>
+                  <Play aria-hidden /> {current ? 'Return to player' : 'Play for everyone'}
+                </button>
+              ) : (
+                <button type="button" className="watch-primary" onClick={() => onSection('search')}>
+                  <Search aria-hidden /> {canSearch ? 'Search videos' : 'Open a video link'}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section className="watch-shelf" aria-labelledby="watch-shelf-heading">
+        <header className="watch-shelf-heading">
+          <div>
+            <h2 id="watch-shelf-heading">{section === 'library' ? 'On the server' : section === 'search' ? 'Search & links' : section === 'streaming' ? 'Streaming services' : 'Up next'}</h2>
+            {section === 'library' && library && <p>{library.length} {library.length === 1 ? 'video' : 'videos'}</p>}
+          </div>
+          {section === 'library' && (
+            <div className="watch-shelf-actions">
+              {!!library?.length && (
+                <label className="watch-field watch-filter">
+                  <Search aria-hidden />
+                  <input type="search" aria-label="Filter server videos" placeholder="Find a video" value={libraryFilter}
+                    onChange={(event) => setLibraryFilter(event.target.value)} />
+                </label>
+              )}
+              <button type="button" className="watch-secondary" onClick={() => filePicker.current?.click()} disabled={disabled}>
+                {progress === null ? <Upload aria-hidden /> : <Loader2 aria-hidden className="animate-spin" />}
+                {progress === null ? 'Upload video' : `Uploading ${Math.round(progress * 100)}%`}
+              </button>
+            </div>
+          )}
+        </header>
+
+        {message && <p className="watch-notice" role={message.error ? 'alert' : 'status'}>{message.text}</p>}
+
+        {section === 'library' && (
+          <>
+            {libraryError && <div className="watch-notice" role="alert">{libraryError} <button type="button" onClick={() => setRefresh((value) => value + 1)}>Try again</button></div>}
+            {!library && !libraryError && (
+              <div className="watch-skeleton" role="status" aria-label="Loading server videos">
+                {[0, 1, 2, 3].map((key) => <div key={key} />)}
+              </div>
+            )}
+            {library?.length === 0 && !libraryError && <Empty icon={FolderOpen} title="The server library is empty">Upload a video to make it available to the room.</Empty>}
+            {!!library?.length && filtered?.length === 0 && <Empty icon={Search} title="No matching videos">Try a different title.</Empty>}
+            {!!filtered?.length && (
+              <PosterGrid>
+                {filtered.map((entry) => renderCard(fromLibrary(entry), {
+                  subtitle: entry.hls ? `${formatBytes(entry.bytes)} · Streaming` : formatBytes(entry.bytes),
+                  playable: entry.playable,
+                  reason: !entry.playable ? 'This file format can’t play in a browser' : !entry.fastStart && !entry.hls ? 'May take longer to start' : undefined,
+                }, entry))}
+              </PosterGrid>
+            )}
+          </>
+        )}
+
+        {(section === 'search' || section === 'streaming') && (
+          <>
+            <form className="watch-form" onSubmit={(event) => { event.preventDefault(); submit(section === 'search' ? query : streamInput, section) }}>
+              <label className="watch-field">
+                {section === 'search' ? <Search aria-hidden /> : <Link2 aria-hidden />}
+                <input
+                  key={section} value={section === 'search' ? query : streamInput}
+                  onChange={(event) => (section === 'search' ? setQuery : setStreamInput)(event.target.value)}
+                  aria-label={section === 'streaming' ? 'Streaming link or title' : canSearch ? 'Search YouTube or paste a video link' : 'Video link'}
+                  placeholder={section === 'streaming' ? 'Paste a streaming link or enter a title' : canSearch ? 'Search YouTube or paste a video link' : 'Paste a YouTube or direct video link'}
+                  spellCheck={false} autoComplete="off"
+                />
+              </label>
+              <button type="submit" className="watch-primary" disabled={disabled || !(section === 'search' ? query : streamInput).trim()}>
+                {action === section ? <Loader2 aria-hidden className="animate-spin" /> : null}
+                {section === 'search' && canSearch ? 'Search' : 'Open'}
+              </button>
+            </form>
+            {pending && (
+              <div className="watch-notice">
+                <p>{pending.note}</p>
+                <div className="watch-feature-actions">
+                  <button type="button" className="watch-primary" disabled={disabled} onClick={() => {
+                    void perform(pending.ref, async () => { await add(pending, true); setPending(null) }, 'Could not start the countdown.')
+                  }}>Start countdown</button>
+                  <button type="button" className="watch-secondary" onClick={() => setPending(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {section === 'search' && (
+          <>
+            {action === 'search' && <p className="watch-notice" role="status">Looking up your video…</p>}
+            {action !== 'search' && results?.length === 0 && <Empty icon={Search} title="No videos found">Try a different search.</Empty>}
+            {!!results?.length && <PosterGrid>{results.map((result) => renderCard({
+              source: 'youtube', ref: result.id, title: result.title, thumbnail: result.thumbnail, duration: null,
+            }, { subtitle: result.channel }))}</PosterGrid>}
+            {results === null && !action && !pending && <Empty icon={Link2} title={canSearch ? 'Find a video on YouTube' : 'Open a video by link'}>
+              {canSearch ? 'Search by title or paste a YouTube or direct video link.' : 'Paste a YouTube link or a direct link to a video file.'}
+            </Empty>}
+          </>
+        )}
+
+        {section === 'streaming' && <div className="watch-streaming"><StreamingSetup /></div>}
+
+        {section === 'queue' && (
+          <QueuePanel
+            roomId={roomId} items={queue} nowPlayingId={current?.id ?? null} disabled={!ready}
+            onQueueChange={onQueueChange} onPlayNow={(item) => item.id === current?.id ? onResume() : onPlayQueued(item)}
+            onBrowse={() => onSection('library')}
+          />
+        )}
+        {section === 'library' && !!next && current && (
+          <button type="button" className="watch-queue-link" onClick={() => onSection('queue')}>
+            <ListVideo aria-hidden /> <span>Up next <strong>{next.title}</strong></span><ArrowUpRight aria-hidden />
+          </button>
+        )}
+      </section>
+
+      <dialog ref={deleteDialog} className="watch-dialog" aria-labelledby="watch-delete-title" onCancel={(event) => {
+        event.preventDefault()
+        if (action !== 'delete') setPendingDelete(null)
+      }}>
+        {pendingDelete && <>
+          <h3 id="watch-delete-title">Delete this server video?</h3>
+          <p>{pendingDelete.title} will be removed from the server{pendingDelete.hls ? ' along with its streamed copy' : ''}. This can’t be undone.</p>
+          {message?.error && <p role="alert">{message.text}</p>}
+          <div className="watch-feature-actions">
+            <Button type="button" flat autoFocus disabled={action === 'delete'} onClick={() => setPendingDelete(null)}>Keep it</Button>
+            <button type="button" className="watch-secondary" disabled={disabled} onClick={() => {
+              void perform('delete', async () => {
+                await watchApi.deleteFromLibrary(roomId, pendingDelete.file)
+                setLibrary((items) => items?.filter((entry) => entry.file !== pendingDelete.file) ?? null)
+                setPendingDelete(null)
+              }, 'Could not delete this video.')
+            }}>{action === 'delete' ? 'Deleting…' : 'Delete video'}</button>
+          </div>
+        </>}
+      </dialog>
     </div>
   )
 }

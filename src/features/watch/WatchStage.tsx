@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
-import { Loader2, MessagesSquare, Play, VolumeX, WifiOff, X } from 'lucide-react'
+import { ArrowLeft, Clapperboard, FolderOpen, ListVideo, Loader2, MessagesSquare, MonitorPlay, Play, Search, VolumeX, WifiOff, X } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
 import * as watchApi from '@/features/watch/api'
 import { ExternalBeacon } from '@/features/watch/players/ExternalBeacon'
 import { FilePlayer } from '@/features/watch/players/FilePlayer'
 import { YouTubePlayer } from '@/features/watch/players/YouTubePlayer'
-import { QueuePanel } from '@/features/watch/QueuePanel'
-import { type Queued } from '@/features/watch/SourcePicker'
-import { WatchBrowser } from '@/features/watch/WatchBrowser'
-import { CoverAmbience } from '@/features/music/CoverAmbience'
+import { WatchBrowser, type WatchSection } from '@/features/watch/WatchBrowser'
 import type { AudioTrackInfo, PlayerHandle, QueueItem, SubtitleTrack } from '@/features/watch/types'
 import { useDriftCorrection } from '@/features/sync/useDriftCorrection'
 import { usePlaybackKeeper } from '@/features/sync/usePlaybackKeeper'
@@ -24,6 +20,15 @@ import { WatchToasts } from '@/features/watch/WatchToasts'
 import { apiUrl } from '@/lib/config'
 import { cn } from '@/lib/utils'
 import { petCue, setPetWatching, useHoldPetScene, type PetCueKind } from '@/features/pet/petCues'
+
+import './watch.css'
+
+const SECTIONS = [
+  { id: 'library', label: 'Library', icon: FolderOpen },
+  { id: 'search', label: 'Search', icon: Search },
+  { id: 'streaming', label: 'Streaming', icon: MonitorPlay },
+  { id: 'queue', label: 'Up next', icon: ListVideo },
+] satisfies { id: WatchSection; label: string; icon: typeof Search }[]
 
 const EASE = [0.16, 1, 0.3, 1] as const
 
@@ -79,7 +84,11 @@ export function WatchStage({
   snapshotRef.current = snapshot
   const handleRef = useRef(handle)
   handleRef.current = handle
-  const [queueOpen, setQueueOpen] = useState(false)
+  const [section, setSection] = useState<WatchSection>('library')
+  const [browsing, setBrowsing] = useState(false)
+  const navigation = useRef<HTMLElement>(null)
+  const playerTitle = useRef<HTMLHeadingElement>(null)
+  const focusPlayer = useRef(false)
   const [canSearch, setCanSearch] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [position, setPosition] = useState(0)
@@ -105,6 +114,36 @@ export function WatchStage({
   const [buffering, setBuffering] = useState(false)
 
   const item = snapshot?.item ?? null
+  const showPlayer = !!item && !browsing
+
+  function openSection(next: WatchSection) {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+    focusPlayer.current = false
+    setSection(next)
+    setBrowsing(true)
+  }
+
+  function returnToLibrary() {
+    openSection('library')
+    navigation.current?.querySelector<HTMLButtonElement>('[data-section="library"]')?.focus()
+  }
+
+  function browseFromContent(next: WatchSection) {
+    openSection(next)
+    navigation.current?.querySelector<HTMLButtonElement>(`[data-section="${next}"]`)?.focus()
+  }
+
+  const showPlayingItem = useCallback(() => {
+    focusPlayer.current = true
+    setBrowsing(false)
+  }, [])
+
+  useEffect(() => {
+    if (showPlayer && focusPlayer.current) {
+      playerTitle.current?.focus({ preventScroll: true })
+      focusPlayer.current = false
+    }
+  }, [showPlayer, item?.id])
 
   /* Reactions floating over the film, and moments pinned in it. */
   const fun = useWatchFun(roomId, item?.id ?? null)
@@ -177,18 +216,20 @@ export function WatchStage({
 
   /* Start the timer when a video is playing; clear when paused or empty. */
   useEffect(() => {
-    if (!item || !snapshot?.playing) {
+    if (!showPlayer || !isFullscreen || !snapshot?.playing) {
       setChromeVisible(true)
       if (hideTimer.current) clearTimeout(hideTimer.current)
       return
     }
     resetHideTimer()
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current) }
-  }, [item, snapshot?.playing, resetHideTimer])
+  }, [showPlayer, isFullscreen, snapshot?.playing, resetHideTimer])
 
   /* Track fullscreen state changes (user might press Escape). */
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!document.fullscreenElement)
+    const onChange = () => {
+      setIsFullscreen(document.fullscreenElement === stageRef.current)
+    }
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
@@ -241,12 +282,12 @@ export function WatchStage({
      * swapping in the OS player chrome for our custom controls while it's
      * open — a real tradeoff, but better than a black rectangle.
      */
-    if (video?.webkitSupportsFullscreen) {
-      video.webkitEnterFullscreen?.()
+    if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen()
       return
     }
 
-    stageRef.current.requestFullscreen().catch(() => undefined)
+    stageRef.current.requestFullscreen?.().catch(() => undefined)
   }, [handle])
 
   /*
@@ -287,6 +328,9 @@ export function WatchStage({
     toggleFullscreen()
   }, [toggleFullscreen])
 
+  useEffect(() => () => {
+    if (clickTimer.current) clearTimeout(clickTimer.current)
+  }, [item?.id, showPlayer])
 
   useEffect(() => {
     watchApi
@@ -304,14 +348,6 @@ export function WatchStage({
   useEffect(() => {
     setError(null)
   }, [item?.id])
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   /*
    * Follow the room, and keep following it — see `usePlaybackKeeper`. No
@@ -440,7 +476,10 @@ export function WatchStage({
     [handle],
   )
 
-  const playNow = useCallback((next: QueueItem) => send('watch:load', { itemId: next.id }), [send])
+  const playNow = useCallback((next: QueueItem) => {
+    send('watch:load', { itemId: next.id })
+    showPlayingItem()
+  }, [send, showPlayingItem])
 
   /*
    * The player was played or paused by something outside this app.
@@ -489,7 +528,7 @@ export function WatchStage({
    * one. Holding the id and waiting for that exact row is the whole fix.
    */
   const onQueued = useCallback(
-    ({ item: added, items }: Queued, playImmediately: boolean) => {
+    ({ item: added, items }: watchApi.Queued, playImmediately: boolean) => {
       /* The REST reply is already the new queue, so seed it rather than wait
          on the socket — otherwise a dropped `watch:queue` means the pending
          load never resolves and the pick silently does nothing. */
@@ -519,322 +558,213 @@ export function WatchStage({
     send('watch:ended', { seq: snapshot.seq })
   }, [send, snapshot])
 
-  const first = queue[0]
-
   const revealX = origin ? `${Math.round(origin.left + origin.width / 2)}px` : '50%'
   const revealY = origin ? `${Math.round(origin.top + origin.height / 2)}px` : '50%'
+  const visibleChrome = !isFullscreen || !snapshot?.playing || chromeVisible
+  const currentIndex = queue.findIndex((entry) => entry.id === item?.id)
+  const next = queue[currentIndex + 1]
+  const status = !connected ? 'Reconnecting…' : !snapshot ? 'Syncing…' :
+    snapshot.viewers.length ? `${snapshot.viewers.length} watching` : null
 
   return createPortal(
     <motion.div
-      /*
-       * Sized explicitly rather than by `inset-0`: several ancestors on this
-       * page can establish a containing block, and when one does a fixed
-       * element's insets resolve against something that is not the screen.
-       *
-       * The opening is a CSS keyframe for the same reason `MusicStage` uses
-       * one — animating `clip-path` through Motion on a portalled, fixed
-       * element inside an `AnimatePresence` left it parked on its first
-       * frame: a working page clipped to a zero-radius circle, which is to
-       * say invisible.
-       */
-      ref={stageRef}
-      className={cn(
-        'fixed left-0 top-0 z-[135] flex flex-col overflow-hidden transition-[padding] duration-500 ease-glass',
-        /* Solid the moment there is a picture to protect; see-through while
-           the shelf is up, so the room stays visible underneath it. */
-        item ? 'bg-void' : 'bg-transparent',
-      )}
+      className="watch-stage"
       style={{
-        width: '100vw',
-        height: '100dvh',
         paddingRight: `${insetRight}rem`,
-        cursor: chromeVisible ? undefined : 'none',
         ['--reveal-x' as string]: revealX,
         ['--reveal-y' as string]: revealY,
-        animation: 'stage-reveal 0.62s cubic-bezier(0.16, 1, 0.3, 1) both',
       }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.3, ease: EASE }}
-      onMouseMove={resetHideTimer}
-      onTouchStart={resetHideTimer}
+      transition={{ duration: 0.25, ease: EASE }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented || !showPlayer || isFullscreen ||
+          (event.target instanceof Element && event.target.closest('input, [role="dialog"]'))) return
+        returnToLibrary()
+      }}
     >
-      <div className="flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1">
-          <div className={cn('absolute inset-0', item ? 'bg-black' : 'bg-transparent')}>
-            {/*
-              One persistent player for the room's whole life, kept mounted
-              past the video that introduced it. A fresh instance per video
-              meant `destroy()` immediately followed by `new Player()` —
-              which is what crashed the SDK, on *any* switch away from
-              YouTube too, since that unmounted it mid glue-code. Idle, it is
-              a paused iframe under the current source, driving nothing.
-            */}
-            {stickyYouTubeRef && (
-              <YouTubePlayer
-                key="youtube"
-                videoId={stickyYouTubeRef}
-                active={item?.source === 'youtube'}
-                startAt={targetPosition()}
-                onHandle={setHandle}
-                onEnded={onEnded}
-                onError={setError}
-                onCaptions={setYouTubeCaptions}
-              />
-            )}
+      <header className="watch-header">
+        <div className="watch-brand"><span><Clapperboard aria-hidden /></span>Watch</div>
+        <nav ref={navigation} className="watch-nav" aria-label="Watch navigation">
+          {SECTIONS.map(({ id, label, icon: Icon }) => (
+            <button key={id} data-section={id} type="button"
+              aria-current={!showPlayer && section === id ? 'page' : undefined}
+              onClick={() => openSection(id)}>
+              <Icon aria-hidden /> <span>{label}</span>
+              {id === 'queue' && queue.length > 0 && <small>{queue.length}</small>}
+            </button>
+          ))}
+        </nav>
+        <div className="watch-header-actions">
+          {status && <p className="watch-room-status" role="status">
+            {!connected ? <WifiOff aria-hidden /> : !snapshot ? <Loader2 aria-hidden className="animate-spin" /> : <span className="watch-status-dot" />}
+            <span className="watch-status-text">{status}</span>
+          </p>}
+          {!showPlayer && item && (
+            <button type="button" className="watch-secondary watch-resume" aria-label="Open player" onClick={showPlayingItem}>
+              <Play aria-hidden /> <span>Player</span>
+            </button>
+          )}
+          {onTogglePanel && (
+            <button type="button" className="watch-icon watch-chat" onClick={onTogglePanel} aria-label="Chat and call" aria-pressed={panelOpen} title="Chat and call">
+              <MessagesSquare aria-hidden />
+              {unread > 0 && !panelOpen && <small>{unread > 9 ? '9+' : unread}</small>}
+            </button>
+          )}
+          <button type="button" className="watch-icon" onClick={onClose} aria-label="Leave Watch" title="Leave Watch">
+            <X aria-hidden />
+          </button>
+        </div>
+      </header>
 
-            {/*
-              A clear layer over YouTube's picture.
+      <div className="watch-body">
+        <WatchBrowser
+          key={roomId}
+          roomId={roomId}
+          section={section}
+          visible={!showPlayer}
+          canSearch={canSearch}
+          queue={queue}
+          current={item}
+          playing={!!snapshot?.playing}
+          ready={connected && !!snapshot}
+          onSection={browseFromContent}
+          onQueued={onQueued}
+          onQueueChange={setQueue}
+          onPlayQueued={playNow}
+          onResume={showPlayingItem}
+        />
 
-              Mouse movement over an iframe goes to the iframe, not to us: YouTube
-              drew its own title, share button, "More videos" and logo on every
-              hover, and the stage never saw the movement, so Huddle's controls
-              only came back near the bottom edge. Covering the picture keeps the
-              pointer ours — YouTube stays a picture, Huddle stays the player.
-              Last in this box so it sits above the iframe but below the controls.
-            */}
-            {item?.source === 'youtube' && (
-              <div
-                aria-hidden
-                className="absolute inset-0"
-                onClick={onPictureClick}
-                onDoubleClick={onPictureDoubleClick}
-              />
-            )}
+        {/* The player keeps its DOM and socket subscription while the catalog is open. */}
+        <section className={cn('watch-theater', !showPlayer && 'watch-theater-away')} inert={!showPlayer} data-lenis-prevent>
+          <div className="watch-theater-inner">
+            <div className="watch-theater-top">
+              <button type="button" className="watch-secondary" onClick={returnToLibrary}><ArrowLeft aria-hidden /> Back to library</button>
+            </div>
+            <div
+              ref={stageRef}
+              className={cn('watch-player', !visibleChrome && 'watch-player-quiet')}
+              onMouseMove={isFullscreen ? resetHideTimer : undefined}
+              onTouchStart={isFullscreen ? resetHideTimer : undefined}
+            >
+              <div className={cn('watch-picture', item?.source === 'external' && 'watch-picture-external')}>
+                {stickyYouTubeRef && (
+                  <YouTubePlayer
+                    key="youtube"
+                    videoId={stickyYouTubeRef}
+                    active={item?.source === 'youtube'}
+                    startAt={targetPosition()}
+                    onHandle={setHandle}
+                    onEnded={onEnded}
+                    onError={setError}
+                    onCaptions={setYouTubeCaptions}
+                  />
+                )}
+                {embeddable && (
+                  <div aria-hidden className="absolute inset-0 z-1" onClick={onPictureClick} onDoubleClick={onPictureDoubleClick} />
+                )}
 
-            {item && embeddable && item.source === 'file' && (
-              <FilePlayer
-                key={item.id}
-                /* Uploads are stored as a server-relative path, which resolves
-                   against the *frontend* once the two are on different origins.
-                   `apiUrl` puts it back on the API. The service worker in
-                   `public/ngrok-sw.js` adds the `ngrok-skip-browser-warning`
-                   header so ngrok doesn't serve its interstitial to the
-                   `<video>` element. */
-                src={apiUrl(item.ref)}
-                startAt={targetPosition()}
-                subtitles={item.subtitles}
-                onHandle={setHandle}
-                onEnded={onEnded}
-                onError={setError}
-                onAudioTracksChanged={syncAudioTracks}
-                onIntentChanged={onPlayerIntent}
-              />
-            )}
+                {item?.source === 'file' && (
+                  <FilePlayer
+                    key={item.id}
+                    src={apiUrl(item.ref)}
+                    startAt={targetPosition()}
+                    subtitles={item.subtitles}
+                    onHandle={setHandle}
+                    onEnded={onEnded}
+                    onError={setError}
+                    onAudioTracksChanged={syncAudioTracks}
+                    onIntentChanged={onPlayerIntent}
+                  />
+                )}
+                {item?.source === 'external' && (
+                  <ExternalBeacon item={item} position={snapshot?.position ?? 0} playing={snapshot?.playing ?? false} />
+                )}
 
-            {item && item.source === 'external' && (
-              <ExternalBeacon
-                item={item}
-                position={snapshot?.position ?? 0}
-                playing={snapshot?.playing ?? false}
-              />
-            )}
+                {embeddable && !error && (buffering || snapshot?.playing && !handle) && (
+                  <div className="watch-player-message watch-player-center" role="status">
+                    <span><Loader2 aria-hidden className="animate-spin" /> {handle ? 'Buffering…' : 'Loading video…'}</span>
+                  </div>
+                )}
+                {keeper.soundHeld && snapshot?.playing && !error && (
+                  <div className="watch-player-message watch-player-bottom" role="status">
+                    <span><VolumeX aria-hidden /> Tap for sound</span>
+                  </div>
+                )}
+                {error && (
+                  <div className="watch-player-message watch-player-center" role="alert"><span>{error}</span></div>
+                )}
+                {isFullscreen && (
+                  <button type="button" className="watch-secondary watch-fullscreen-back" onClick={returnToLibrary}><ArrowLeft aria-hidden /> Back to library</button>
+                )}
+              </div>
 
-            {!item && (
-              /*
-                The browser, not a dialog full of source buttons.
-                Choosing what to watch is most of the time spent here when
-                nothing is on, so it gets the whole screen and the same rail
-                the music library uses — with a thumbnail grid, because a
-                still frame identifies a video faster than its title does.
-              */
-              <div className="absolute inset-0 flex flex-col">
-                <CoverAmbience palette={null} translucent />
-                <div className="relative flex min-h-0 flex-1 flex-col pt-16">
-                  {first && (
-                    <div className="shrink-0 px-4 pb-1 md:px-6">
-                      <button
-                        type="button"
-                        onClick={() => playNow(first)}
-                        className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-3 text-left outline-none backdrop-blur-md transition-colors hover:bg-white/[0.09] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
-                      >
-                        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-chalk text-void">
-                          <Play aria-hidden className="size-4 translate-x-px fill-current" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block text-[0.7rem] uppercase tracking-[0.16em] text-dusk">
-                            Pick up where the room left off
-                          </span>
-                          <span className="block truncate text-[0.88rem] text-chalk">
-                            {first.title}
-                          </span>
-                        </span>
-                      </button>
-                    </div>
-                  )}
+              {showPlayer && (
+                <>
+                  <WatchToasts snapshot={snapshot} selfId={selfId} />
+                  <WatchFun
+                    item={item ? { id: item.id, title: item.title } : null}
+                    position={position}
+                    chromeVisible={visibleChrome}
+                    selfId={selfId}
+                    reactions={fun.reactions}
+                    moments={fun.moments}
+                    arrival={fun.arrival}
+                    onDismissArrival={fun.dismissArrival}
+                    onReact={fun.react}
+                    onPin={fun.pin}
+                    onRemove={fun.remove}
+                    onSeek={seekRoom}
+                  />
+                </>
+              )}
 
-                  <WatchBrowser
-                    roomId={roomId}
-                    canSearch={canSearch}
-                    queue={queue}
-                    nowPlayingRef={null}
-                    playing={false}
-                    onQueued={onQueued}
-                    onPlayQueued={playNow}
+              {snapshot && item && (
+                <div className="watch-player-controls">
+                  <WatchControls
+                    key={item.id}
+                    snapshot={snapshot}
+                    position={position}
+                    duration={duration}
+                    hasNext={!!next}
+                    isFullscreen={isFullscreen}
+                    audioTracks={audioTracks}
+                    audioTrack={audioTrack}
+                    onAudioTrackChange={onAudioTrackChange}
+                    subtitles={item.source === 'youtube' ? youTubeCaptions : (item.subtitles ?? [])}
+                    subtitleTrack={subtitleTrack}
+                    onSubtitleTrackChange={onSubtitleTrackChange}
+                    onPlayPause={playPause}
+                    onSeek={seekRoom}
+                    onRate={(rate) => send('watch:control', { action: 'rate', rate })}
+                    onSkip={skip}
+                    onToggleFullscreen={toggleFullscreen}
+                    disabled={!connected}
+                    markers={fun.moments.map((m) => ({
+                      id: m.id,
+                      position: m.position,
+                      emoji: m.emoji,
+                      label: `${m.emoji} ${clock(m.position)}${m.note ? ` — ${m.note}` : ''} (${m.createdBy.name})`,
+                    }))}
                   />
                 </div>
+              )}
+            </div>
+            {item && (
+              <div className="watch-theater-details">
+                <div>
+                  <p>
+                    {item.source === 'youtube' ? 'YouTube' : item.source === 'file' ? 'Server video' : 'Synced countdown'}
+                    {' · '}{snapshot?.playing ? 'Watching together' : 'Paused in the room'}
+                  </p>
+                  <h1 ref={playerTitle} tabIndex={-1}>{item.title}</h1>
+                </div>
+                {next && <button type="button" className="watch-queue-link" onClick={() => browseFromContent('queue')}>
+                  <ListVideo aria-hidden /> <span>Up next <strong>{next.title}</strong></span>
+                </button>}
               </div>
             )}
           </div>
-
-          {buffering && (
-            <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
-              <span className="glass-pill-ink flex items-center gap-2.5 rounded-full px-4 py-2.5">
-                <Loader2 aria-hidden className="size-4 animate-spin text-signal-bright" />
-                <span className="text-[0.78rem] text-chalk">Buffering…</span>
-              </span>
-            </div>
-          )}
-
-          {/*
-            Not a button and not in the way: the film is already playing, in
-            step, just muted because the browser asks for a touch before sound.
-            Any touch anywhere — this note, the picture, a control — brings it
-            back (see `unlock`).
-          */}
-          {keeper.soundHeld && snapshot?.playing && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex justify-center px-4">
-              <span className="glass-pill-ink flex items-center gap-2 rounded-full px-4 py-2 text-[0.8rem] text-chalk">
-                <VolumeX aria-hidden className="size-4 text-mist" />
-                Playing in sync, muted — tap anywhere for sound
-              </span>
-            </div>
-          )}
-
-          {error && (
-            <div className="absolute inset-x-0 top-0 z-10 flex justify-center p-4">
-              <p
-                role="alert"
-                className="glass-pill-ink max-w-lg rounded-card px-4 py-3 text-center text-[0.82rem] leading-relaxed text-signal-bright"
-              >
-                {error}
-              </p>
-            </div>
-          )}
-
-          <header
-            className={cn(
-              'pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 bg-gradient-to-b from-void/90 to-transparent p-4 transition-opacity duration-500 ease-glass md:p-5',
-              chromeVisible ? 'opacity-100' : 'opacity-0',
-            )}
-          >
-            <span className="pointer-events-auto flex items-center gap-2.5">
-              {snapshot && snapshot.viewers.length > 0 && (
-                <span className="glass-pill-ink flex items-center gap-2 rounded-full px-3 py-1.5">
-                  <span className="size-1.5 animate-signal-pulse rounded-full bg-emerald-400" />
-                  <span className="text-[0.72rem] text-chalk">
-                    {snapshot.viewers.length} watching
-                  </span>
-                </span>
-              )}
-              {!connected && (
-                <span className="glass-pill-ink flex items-center gap-2 rounded-full px-3 py-1.5 text-signal-bright">
-                  <WifiOff aria-hidden className="size-3.5" />
-                  <span className="text-[0.72rem]">Reconnecting…</span>
-                </span>
-              )}
-              {!snapshot && (
-                <span className="glass-pill-ink flex items-center gap-2 rounded-full px-3 py-1.5">
-                  <Loader2 aria-hidden className="size-3.5 animate-spin text-mist" />
-                  <span className="text-[0.72rem] text-mist">Syncing…</span>
-                </span>
-              )}
-            </span>
-
-            <span className="pointer-events-auto flex items-center gap-2">
-              {onTogglePanel && (
-                <button
-                  type="button"
-                  onClick={onTogglePanel}
-                  aria-label="Chat and call"
-                  aria-pressed={panelOpen}
-                  className={cn(
-                    'relative flex h-11 items-center gap-2 rounded-full border px-3.5 outline-none transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal sm:h-10',
-                    panelOpen
-                      ? 'border-signal/50 bg-signal/15 text-chalk'
-                      : 'border-white/15 bg-white/[0.05] text-chalk backdrop-blur-md hover:border-white/30 hover:bg-white/[0.1]',
-                  )}
-                >
-                  <MessagesSquare aria-hidden className="size-4" />
-                  {unread > 0 && !panelOpen && (
-                    <span className="min-w-4 rounded-full bg-signal px-1 text-[0.62rem] font-semibold leading-4 text-white">
-                      {unread > 9 ? '9+' : unread}
-                    </span>
-                  )}
-                </button>
-              )}
-              <Button variant="outline" size="icon" onClick={onClose} aria-label="Leave the stage" plain>
-                <X aria-hidden />
-              </Button>
-            </span>
-          </header>
-
-          <WatchToasts snapshot={snapshot} selfId={selfId} />
-
-          <WatchFun
-            item={item ? { id: item.id, title: item.title } : null}
-            position={position}
-            chromeVisible={chromeVisible}
-            selfId={selfId}
-            reactions={fun.reactions}
-            moments={fun.moments}
-            arrival={fun.arrival}
-            onDismissArrival={fun.dismissArrival}
-            onReact={fun.react}
-            onPin={fun.pin}
-            onRemove={fun.remove}
-            onSeek={seekRoom}
-          />
-
-          <div
-            className={cn(
-              'absolute inset-x-0 bottom-0 transition-opacity duration-500 ease-glass',
-              chromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none',
-            )}
-          >
-            {snapshot && (
-              <WatchControls
-                snapshot={snapshot}
-                position={position}
-                duration={duration}
-                queueCount={queue.length}
-                queueOpen={queueOpen}
-                isFullscreen={isFullscreen}
-                audioTracks={audioTracks}
-                audioTrack={audioTrack}
-                onAudioTrackChange={onAudioTrackChange}
-                subtitles={item?.source === 'youtube' ? youTubeCaptions : (item?.subtitles ?? [])}
-                subtitleTrack={subtitleTrack}
-                onSubtitleTrackChange={onSubtitleTrackChange}
-                onToggleQueue={() => setQueueOpen((open) => !open)}
-                onPlayPause={playPause}
-                onSeek={(seconds) => send('watch:control', { action: 'seek', position: seconds })}
-                onRate={(rate) => send('watch:control', { action: 'rate', rate })}
-                onSkip={skip}
-                onToggleFullscreen={toggleFullscreen}
-                disabled={!item}
-                markers={fun.moments.map((m) => ({
-                  id: m.id,
-                  position: m.position,
-                  emoji: m.emoji,
-                  label: `${m.emoji} ${clock(m.position)}${m.note ? ` — ${m.note}` : ''} (${m.createdBy.name})`,
-                }))}
-              />
-            )}
-          </div>
-        </div>
-
-        {queueOpen && (
-          <QueuePanel
-            roomId={roomId}
-            items={queue}
-            nowPlayingId={item?.id ?? null}
-            canSearch={canSearch}
-            onQueueChange={setQueue}
-            onQueued={onQueued}
-            onPlayNow={(next) => playNow(next)}
-            onClose={() => setQueueOpen(false)}
-          />
-        )}
+        </section>
       </div>
     </motion.div>,
     document.body,

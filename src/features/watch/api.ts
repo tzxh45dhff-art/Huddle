@@ -106,6 +106,8 @@ export function fetchQueue(roomId: string) {
   return api.get<{ items: QueueItem[] }>(`/rooms/${roomId}/watch/queue`).then((r) => r.items)
 }
 
+export type Queued = { item: QueueItem; items: QueueItem[] }
+
 /**
  * Add one thing to the queue.
  *
@@ -116,7 +118,7 @@ export function fetchQueue(roomId: string) {
  */
 export function addToQueue(roomId: string, item: Omit<ResolvedSource, 'note'>) {
   return api
-    .post<{ item: QueueItem; items: QueueItem[] }>(`/rooms/${roomId}/watch/queue`, item)
+    .post<Queued>(`/rooms/${roomId}/watch/queue`, item)
     .then((response) => {
       announce(roomId)
       return response

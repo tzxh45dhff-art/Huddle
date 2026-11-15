@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Captions,
   Languages,
-  ListVideo,
   Maximize,
   Minimize,
   Pause,
@@ -30,8 +29,7 @@ export function WatchControls({
   snapshot,
   position,
   duration,
-  queueCount,
-  queueOpen,
+  hasNext,
   isFullscreen,
   audioTracks,
   audioTrack,
@@ -39,7 +37,6 @@ export function WatchControls({
   subtitles,
   subtitleTrack,
   onSubtitleTrackChange,
-  onToggleQueue,
   onPlayPause,
   onSeek,
   onRate,
@@ -51,8 +48,7 @@ export function WatchControls({
   snapshot: WatchSnapshot
   position: number
   duration: number
-  queueCount: number
-  queueOpen: boolean
+  hasNext: boolean
   isFullscreen: boolean
   /** Empty when the source has nothing to choose between. */
   audioTracks: AudioTrackInfo[]
@@ -64,7 +60,6 @@ export function WatchControls({
   /** Index into `subtitles`, or -1 for off. */
   subtitleTrack: number
   onSubtitleTrackChange: (index: number) => void
-  onToggleQueue: () => void
   onPlayPause: () => void
   onSeek: (seconds: number) => void
   onRate: (rate: number) => void
@@ -101,9 +96,9 @@ export function WatchControls({
   const progress = known ? Math.min(100, (shown / duration) * 100) : 0
 
   return (
-    <div className="pointer-events-auto flex flex-col gap-2 bg-gradient-to-t from-void via-void/85 to-transparent px-4 pb-4 pt-10 md:px-6 md:pb-5">
+    <div className="pointer-events-auto flex flex-col gap-1 px-3 pb-3 pt-1 sm:px-5 sm:pb-4 sm:pt-2">
       <div className="flex items-center gap-3">
-        <span className="w-14 shrink-0 text-right font-mono text-[0.72rem] tabular-nums text-mist">
+        <span className="min-w-8 shrink-0 text-right font-mono text-[0.72rem] tabular-nums text-mist">
           {formatTime(shown)}
         </span>
 
@@ -163,12 +158,12 @@ export function WatchControls({
           />
         </div>
 
-        <span className="w-14 shrink-0 font-mono text-[0.72rem] tabular-nums text-dusk">
+        <span className="min-w-8 shrink-0 font-mono text-[0.72rem] tabular-nums text-dusk">
           {known ? formatTime(duration) : '--:--'}
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="watch-control-row">
         <button
           type="button"
           onClick={onPlayPause}
@@ -186,23 +181,14 @@ export function WatchControls({
         <button
           type="button"
           onClick={onSkip}
-          disabled={disabled || queueCount === 0}
+          disabled={disabled || !hasNext}
           aria-label="Skip to next"
           className="grid size-11 shrink-0 place-items-center sm:size-10 rounded-full border border-white/12 bg-white/[0.05] text-chalk outline-none transition-colors duration-300 hover:border-white/30 hover:bg-white/[0.1] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-35"
         >
           <SkipForward aria-hidden className="size-4" />
         </button>
 
-        {/* The title yields first. With captions and audio-language buttons
-            present there are six controls competing for a phone's width, and
-            a title squeezed to three characters is worth less than the room
-            the buttons need. */}
-        <div className="hidden min-w-0 flex-1 px-2 sm:block">
-          <p className="truncate text-[0.85rem] font-medium text-chalk">
-            {snapshot.item?.title ?? 'Nothing playing'}
-          </p>
-        </div>
-        <div className="flex-1 sm:hidden" />
+        <div className="flex-1" />
 
         {subtitles.length > 0 && (
           <div ref={captionsMenu} className="relative shrink-0">
@@ -333,22 +319,6 @@ export function WatchControls({
             </div>
           )}
         </div>
-
-        <button
-          type="button"
-          onClick={onToggleQueue}
-          aria-label="Queue"
-          aria-pressed={queueOpen}
-          className={cn(
-            'flex h-11 shrink-0 items-center gap-2 rounded-full border sm:h-10 px-3.5 outline-none transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal',
-            queueOpen
-              ? 'border-signal/50 bg-signal/15 text-chalk'
-              : 'border-white/12 bg-white/[0.05] text-chalk hover:border-white/30 hover:bg-white/[0.1]',
-          )}
-        >
-          <ListVideo aria-hidden className="size-4" />
-          <span className="text-[0.78rem] tabular-nums">{queueCount}</span>
-        </button>
 
         <button
           type="button"
