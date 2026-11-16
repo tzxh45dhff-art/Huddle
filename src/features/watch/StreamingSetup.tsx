@@ -29,9 +29,10 @@ export function StreamingSetup() {
       <div className="mt-4 flex flex-wrap gap-2">
         <a className="watch-secondary" href="https://www.primevideo.com" target="_blank" rel="noopener noreferrer">Open Prime Video</a>
         <a className="watch-secondary" href="https://www.hotstar.com/in" target="_blank" rel="noopener noreferrer">Open JioHotstar · Beta</a>
+        <a className="watch-secondary" href="https://net77.cc" target="_blank" rel="noopener noreferrer">Open Net77 · Beta</a>
       </div>
       <p className="mt-3 text-sm text-mist">Sign in to the service, play a film or episode, then choose “Start the room on this” in the Huddle panel. Friends can open the shared title from this room. Each viewer needs access to the title.</p>
-      <p className="mt-2 text-xs text-dusk">JioHotstar is experimental on desktop. Live sports and ad-supported playback still need verification.</p>
+      <p className="mt-2 text-xs text-dusk">JioHotstar and Net77 are experimental on desktop. On Net77, each person may need to select the shared title manually.</p>
       {installed && !outdated ? (
         <p className="mt-3 text-[0.78rem] leading-relaxed text-dusk">
           Keep this room open. The extension connects automatically and syncs play, pause, and seek.

@@ -235,7 +235,7 @@
         quietUntil = now + tuning.echoMs
       }
 
-      window.postMessage({ channel: CHANNEL, kind: 'command', command: name, ...extra }, '*')
+      window.postMessage({ channel: CHANNEL, kind: 'command', command: name, titleKey, ...extra }, '*')
     }
 
     /**
@@ -254,7 +254,7 @@
       if (rounded === wantedRate) return
       wantedRate = rounded
       if (rounded !== 1) nudgeWrites += 1
-      window.postMessage({ channel: CHANNEL, kind: 'command', command: 'rate', rate: rounded }, '*')
+      window.postMessage({ channel: CHANNEL, kind: 'command', command: 'rate', titleKey, rate: rounded }, '*')
     }
 
     /** Where the room says the film should be, right now. */

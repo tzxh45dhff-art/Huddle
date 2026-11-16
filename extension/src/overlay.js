@@ -223,9 +223,17 @@
         render()
         return
       }
-      const title = el.detectedTitle.textContent || cleanTitle()
+      const net77Title = window.__huddleNet77Title?.()
+      if (window.__huddleNet77Title && !net77Title) {
+        busy = false
+        el.err.textContent = 'Net77 has not identified this title yet.'
+        el.err.style.display = 'block'
+        render()
+        return
+      }
+      const title = net77Title?.title ?? (el.detectedTitle.textContent || cleanTitle())
       const result = await chrome.runtime
-        .sendMessage({ kind: 'announce', title, url: location.href, position: player.position })
+        .sendMessage({ kind: 'announce', title, url: net77Title?.url ?? location.href, position: player.position })
         .catch((error) => ({ ok: false, error: error?.message ?? String(error) }))
       busy = false
       if (!result?.ok) {
@@ -293,6 +301,9 @@
       const roomUrl = window.__huddleRoomUrl?.(room)
       el.joinTitle.style.display = roomUrl && !hasRoomItem ? 'block' : 'none'
       el.joinTitle.href = roomUrl || '#'
+      el.joinTitle.textContent = roomUrl?.includes('#huddle-net77=')
+        ? `Open Net77 and select ${room.item.title}`
+        : 'Open the room’s video'
       el.idleRow.style.display = hasRoomItem ? 'none' : 'block'
       el.followingRow.style.display = hasRoomItem ? 'block' : 'none'
 
@@ -303,7 +314,7 @@
         el.onTitle.style.display = onWatchPage ? 'block' : 'none'
         el.offTitleHint.style.display = onWatchPage ? 'none' : 'block'
         if (onWatchPage) {
-          if (document.activeElement !== el.detectedTitle) el.detectedTitle.textContent = cleanTitle()
+          if (document.activeElement !== el.detectedTitle) el.detectedTitle.textContent = window.__huddleNet77Title?.()?.title ?? cleanTitle()
           el.announce.disabled = busy || !connected || !!player.buffering
           el.announce.textContent = busy ? 'Starting…' : 'Start the room on this'
         }

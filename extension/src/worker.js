@@ -56,6 +56,8 @@ async function load() {
  * is on screen. A tab that is not watching anything simply ignores the push.
  */
 const WATCHABLE = [
+  'https://net77.cc/*',
+  'https://www.net77.cc/*',
   'https://*.hotstar.com/*',
   '*://*.netflix.com/*',
   '*://*.primevideo.com/*',
@@ -252,12 +254,15 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         return
       }
       const item = snapshot?.item
-      const expected = item?.source === 'external' && globalThis.__huddleStreamingIdentity(item.ref)
+      const expected = item?.source === 'external' ? globalThis.__huddleStreamingIdentity(item.ref) : null
       const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [])
-      respond({
-        watching: active?.id === _sender.tab.id ||
-          Boolean(expected && expected === globalThis.__huddleStreamingIdentity(active?.url)),
-      })
+      let actual = globalThis.__huddleStreamingIdentity(active?.url)
+      if (expected?.startsWith('net77:') && active?.id !== undefined &&
+          /^https:\/\/(?:www\.)?net77\.cc\//.test(active.url ?? '')) {
+        const reply = await chrome.tabs.sendMessage(active.id, { kind: 'net77-active' }, { frameId: 0 }).catch(() => null)
+        actual = globalThis.__huddleStreamingIdentity(reply?.url)
+      }
+      respond({ watching: active?.id === _sender.tab.id || Boolean(expected && expected === actual) })
       return
     }
 

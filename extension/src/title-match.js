@@ -4,6 +4,10 @@
       const url = new URL(raw)
       if (url.protocol !== 'https:') return null
       const host = url.hostname
+      if (host === 'net77.cc' || host === 'www.net77.cc') {
+        const key = /^#huddle-net77=([a-z0-9_-]{1,80}(?:\.[0-9]{1,5}\.[0-9]{1,5})?)$/i.exec(url.hash)?.[1]
+        return key && url.pathname === '/home' ? 'net77:' + key.toLowerCase() : null
+      }
       let id
       if (host === 'hotstar.com' || host.endsWith('.hotstar.com')) {
         id = /\/(\d+)(?:\/watch)?\/?$/.exec(url.pathname)?.[1]
@@ -24,7 +28,7 @@
   if (typeof window === 'undefined') return
   window.__huddleRoomUrl = room => identity(room?.item?.ref) ? room.item.ref : null
   window.__huddleMatchesRoom = room => {
-    const local = identity(location.href)
+    const local = identity(window.__huddleNet77Title ? window.__huddleNet77Title()?.url : location.href)
     return !!local && room?.item?.source === 'external' && local === identity(room.item.ref)
   }
 })()
