@@ -69,6 +69,9 @@ function mount(options = {}) {
   sandbox.window = {
     addEventListener(type, fn) { if (type === 'message') onPlayer = fn },
     __huddleResync() {},
+    __huddleMatchesRoom: options.matchesRoom,
+    __huddleRoomUrl: options.roomUrl,
+    __huddleNet77Title: options.localTitle,
     __huddleStats: options.stats ? () => options.stats : undefined,
   }
   sandbox.window.window = sandbox.window
@@ -194,6 +197,22 @@ const check = (n, p, d = '') => R.push({ n, p, d })
   panel.player(1234.5)
   await panel.els.announce._click()
   check('starting a room carries the current playback position', panel.sent.some(m => m.kind === 'announce' && m.position === 1234.5))
+}
+
+{
+  const oldTitle = 'https://www.hotstar.com/in/movies/test/123456/watch'
+  const net77Title = { title: 'Fixture · S1 E2', url: 'https://net77.cc/home#huddle-net77=fixture.1.2' }
+  const panel = mount({ matchesRoom: () => false, roomUrl: () => oldTitle, localTitle: () => net77Title })
+  const room = { kind: 'room', snapshot: { item: { id: 'old', title: 'Old movie' } }, status: 'connected' }
+  panel.tell(room)
+  check('a browsing tab can still open the existing room title', panel.els.joinTitle.style.display === 'block')
+  panel.player(615)
+  panel.tell(room)
+  check('a new detected title takes priority over the old room link', panel.els.joinTitle.style.display === 'none')
+  check('the action clearly offers to switch the room', panel.els.announce.textContent === 'Switch room to this')
+  await panel.els.announce._click()
+  check('switching sends the new episode at its current time', panel.sent.some(m =>
+    m.kind === 'announce' && m.url === net77Title.url && m.position === 615))
 }
 
 let bad = 0

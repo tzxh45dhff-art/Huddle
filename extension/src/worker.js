@@ -58,6 +58,7 @@ async function load() {
 const WATCHABLE = [
   'https://net77.cc/*',
   'https://www.net77.cc/*',
+  'https://*.net52.cc/mobile/*',
   'https://*.hotstar.com/*',
   '*://*.netflix.com/*',
   '*://*.primevideo.com/*',
@@ -258,7 +259,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [])
       let actual = globalThis.__huddleStreamingIdentity(active?.url)
       if (expected?.startsWith('net77:') && active?.id !== undefined &&
-          /^https:\/\/(?:www\.)?net77\.cc\//.test(active.url ?? '')) {
+          /^https:\/\/(?:www\.)?(?:net77|net52)\.cc\//.test(active.url ?? '')) {
         const reply = await chrome.tabs.sendMessage(active.id, { kind: 'net77-active' }, { frameId: 0 }).catch(() => null)
         actual = globalThis.__huddleStreamingIdentity(reply?.url)
       }

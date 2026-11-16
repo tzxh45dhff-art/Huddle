@@ -299,7 +299,8 @@
 
       const hasRoomItem = Boolean(room?.item) && (window.__huddleMatchesRoom ? window.__huddleMatchesRoom(room) : true)
       const roomUrl = window.__huddleRoomUrl?.(room)
-      el.joinTitle.style.display = roomUrl && !hasRoomItem ? 'block' : 'none'
+      const findingNet77 = !onWatchPage && window.__huddleNet77PlayerOpen?.()
+      el.joinTitle.style.display = roomUrl && !hasRoomItem && !onWatchPage && !findingNet77 ? 'block' : 'none'
       el.joinTitle.href = roomUrl || '#'
       el.joinTitle.textContent = roomUrl?.includes('#huddle-net77=')
         ? `Open Net77 and select ${room.item.title}`
@@ -313,10 +314,13 @@
            mean it announces whatever `document.title` happens to say. */
         el.onTitle.style.display = onWatchPage ? 'block' : 'none'
         el.offTitleHint.style.display = onWatchPage ? 'none' : 'block'
+        el.offTitleHint.textContent = findingNet77
+          ? 'Waiting for Net77 to load and identify the video.'
+          : 'Open a title and start playing it to sync the room to it.'
         if (onWatchPage) {
           if (document.activeElement !== el.detectedTitle) el.detectedTitle.textContent = window.__huddleNet77Title?.()?.title ?? cleanTitle()
           el.announce.disabled = busy || !connected || !!player.buffering
-          el.announce.textContent = busy ? 'Starting…' : 'Start the room on this'
+          el.announce.textContent = busy ? 'Starting…' : room?.item ? 'Switch room to this' : 'Start the room on this'
         }
       } else {
         /* Left visible off a title page on purpose — it is useful to see what
