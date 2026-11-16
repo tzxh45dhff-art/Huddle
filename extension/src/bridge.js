@@ -188,9 +188,10 @@
     return match ? match[1] : null
   }
 
-  setInterval(() => {
+  function report(event) {
     const key = titleKey()
     const el = element()
+    if (event && (!el || event.target !== el)) return
     window.postMessage(
       {
         channel: CHANNEL,
@@ -208,11 +209,16 @@
           const el = element()
           return el && Number.isFinite(el.playbackRate) ? el.playbackRate : 1
         })(),
+        seeking: Boolean(el?.seeking),
+        seekEvent: event?.type,
         buffering: buffering(),
       },
       '*',
     )
-  }, REPORT_MS)
+  }
+  setInterval(report, REPORT_MS)
+  document.addEventListener?.('seeking', report, true)
+  document.addEventListener?.('seeked', report, true)
 
   window.addEventListener('message', (event) => {
     /* Same-window messages only. Anything from a frame or another origin is

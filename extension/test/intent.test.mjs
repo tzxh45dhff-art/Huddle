@@ -258,7 +258,7 @@ const check = (name, pass, detail = '') => R.push({ name, pass, detail })
 
   s.sent.length = 0
   s.advance(300)
-  s.push({ position: 501, paused: false })
+  s.push({ position: seeks[0]?.seconds, paused: false, seekEvent: 'seeked' })
   check('OUR OWN seek is not reported back (no loop)', s.sent.length === 0, JSON.stringify(s.sent))
 }
 
@@ -433,6 +433,84 @@ const check = (name, pass, detail = '') => R.push({ name, pass, detail })
   s.push({ position: 16, paused: true })
   s.tick()
   check('opening the shared title resumes sync', s.commands.some(c => c.command === 'play'))
+}
+
+// A scrub performed while paused is still a room seek.
+{
+  const s = bootSync()
+  s.room(s.snap({ playing: false, position: 110 }))
+  s.push({ position: 110, paused: true })
+  s.advance(6000)
+  s.push({ position: 450, paused: true })
+  s.tick()
+  check('a paused local seek reaches the room', s.sent.some(c => c.action === 'seek' && c.position === 450))
+  check('the old room position cannot undo the seek before it is acknowledged', s.commands.length === 0)
+}
+
+// A provider may report the new timestamp before playback has buffered there.
+{
+  const s = bootSync()
+  s.room(s.snap({ position: 110 }))
+  s.push({ position: 110, paused: false })
+  s.advance(6000)
+  s.push({ position: 116, paused: false })
+  s.push({ position: 450, paused: false, seeking: true, buffering: true, seekEvent: 'seeking' })
+  s.tick()
+  s.advance(2000)
+  s.push({ position: 450, paused: false, buffering: true, seekEvent: 'seeked' })
+  s.tick()
+  s.push({ position: 450, paused: false })
+  s.tick()
+  check('a seek that rebuffers broadcasts the landing once', s.sent.length === 1 && s.sent[0].position === 450)
+  check('the old clock does not pull a buffering scrub back', s.commands.every(c => c.command !== 'seek'))
+}
+
+// Explicit seeks from the room bypass drift cooldown. A local override still works.
+{
+  const s = bootSync()
+  s.room(s.snap({ playing: false, position: 110 }))
+  s.push({ position: 110, paused: true })
+  s.room(s.snap({ playing: false, position: 450, seq: 2, by: { action: 'seek' } }))
+  s.tick()
+  s.push({ position: 450, paused: true, seekEvent: 'seeked' })
+  check('an explicit room seek reaches a paused viewer immediately', s.commands.some(c => c.seconds === 450))
+  check('landing an explicit room seek never reports it back', s.sent.length === 0)
+  s.advance(100)
+  s.room(s.snap({ playing: false, position: 480, seq: 3, by: { action: 'seek' } }))
+  s.tick()
+  s.push({ position: 480, paused: true, seekEvent: 'seeked' })
+  check('a second room seek replaces the first without waiting for drift cooldown', s.commands.some(c => c.seconds === 480))
+  s.advance(100)
+  s.push({ position: 110, paused: true, seekEvent: 'seeked' })
+  check('a user can override a recent room seek even back to the original time', s.sent.length === 1 && s.sent[0].position === 110)
+}
+
+// Two local scrubs may complete before the first snapshot returns.
+{
+  const s = bootSync()
+  s.room(s.snap({ playing: false, position: 110 }))
+  s.push({ position: 110, paused: true })
+  s.push({ position: 450, paused: true, seekEvent: 'seeked' })
+  s.push({ position: 480, paused: true, seekEvent: 'seeked' })
+  s.room(s.snap({ playing: false, position: 450, seq: 2, by: { action: 'seek' } }))
+  s.tick()
+  s.room(s.snap({ playing: false, position: 480, seq: 3, by: { action: 'seek' } }))
+  s.tick()
+  check('both local scrubs reach the room', s.sent.length === 2)
+  check('the first reply cannot undo a newer local scrub', s.commands.every(c => c.command !== 'seek'))
+}
+
+// Buffering beyond the normal correction cooldown does not turn an echo into a scrub.
+{
+  const s = bootSync()
+  s.room(s.snap({ playing: false, position: 110 }))
+  s.push({ position: 110, paused: true })
+  s.room(s.snap({ playing: false, position: 450, seq: 2, by: { action: 'seek' } }))
+  s.tick()
+  s.push({ position: 450, paused: true, seeking: true, buffering: true, seekEvent: 'seeking' })
+  s.advance(8000)
+  s.push({ position: 450, paused: true, seekEvent: 'seeked' })
+  check('a slow room seek still has no echo', s.sent.length === 0)
 }
 
 let bad = 0

@@ -325,12 +325,13 @@
    * property meant eight `querySelectorAll` calls a tick, thirty-two a second,
    * on a page that is already doing plenty.
    */
-  setInterval(() => {
+  function report(event) {
     const el = element()
+    if (event && (!el || event.target !== el)) return
     const position = el ? el.currentTime || 0 : 0
     const duration = el && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0
 
-    judgePendingSeek(position, el)
+    if (!event) judgePendingSeek(position, el)
 
     const feature = isFeature(el)
     const key = feature ? titleKey(el) : null
@@ -354,11 +355,16 @@
            paused, and correction has to stand down during one or it seeks a
            player that is already struggling and turns a slow moment into a
            loop of them. */
+        seeking: Boolean(el?.seeking),
+        seekEvent: event?.type,
         buffering: el ? el.readyState < 3 && !el.paused : false,
       },
       '*',
     )
-  }, REPORT_MS)
+  }
+  setInterval(report, REPORT_MS)
+  document.addEventListener?.('seeking', report, true)
+  document.addEventListener?.('seeked', report, true)
 
   window.addEventListener('message', (event) => {
     /* Same-window messages only. Anything from a frame or another origin is

@@ -23,6 +23,9 @@
 
   /** How often the room is compared against the player. Matches the bridge. */
   const TICK_MS = 250
+  const SEEK_ECHO_SECONDS = 0.75
+  const NATIVE_SEEK_SECONDS = 0.25
+  const ROOM_REPLY_MS = 2500
 
   /**
    * Defaults, tuned for a source that can only be corrected by seeking.
@@ -128,9 +131,8 @@
      * settling. Entering a title sets it, because a player that has just
      * started is not yet anywhere.
      *
-     * `quietUntil` suppresses *reporting* — set only when we ourselves moved
-     * the player, so the resulting jump is not read back as the person having
-     * done it. That loop is the one that walks a room backwards.
+     * `quietUntil` suppresses *play/pause reports* after a toggle. Seeks use
+     * their expected destination so a second scrub can still reach the room.
      *
      * They were the same variable at first, which meant entering a title gagged
      * the viewer for five seconds: pause a film two seconds after starting it
@@ -138,6 +140,10 @@
      */
     let settleUntil = 0
     let quietUntil = 0
+    let expectedSeek = null
+    let nativeSeek = false
+    let awaitingSeek = null
+    let roomSeek = false
     let seekCost = tuning.initialSeekCost
     let seekedAt = null
     /** What we last saw, so our own echo is not read as a new intent. */
@@ -197,7 +203,7 @@
      * windows close together: the loop stops correcting while it lands, and
      * the detector stops treating the landing as the viewer's doing.
      */
-    const command = (name, extra = {}) => {
+    const command = (name, extra = {}, explicit = false) => {
       const now = performance.now()
 
       /*
@@ -208,7 +214,7 @@
        * the quiet window forward, that stream of no-op pauses is exactly what
        * would swallow the person's own next action.
        */
-      if (lastCommand.name === name && now - lastCommand.at < tuning.reissueMs) return
+      if (!explicit && lastCommand.name === name && now - lastCommand.at < tuning.reissueMs) return
       lastCommand = { name, at: now }
 
       /* What this command should make the player report, so its arrival is
@@ -219,7 +225,15 @@
       /* A seek has to be waited out; a toggle does not. */
       const seeking = name === 'seek'
       settleUntil = now + (seeking ? tuning.cooldownMs : tuning.toggleSettleMs)
-      quietUntil = now + (seeking ? tuning.cooldownMs : tuning.echoMs)
+      if (seeking) {
+        const duration = player?.duration
+        extra.seconds = Math.max(0, Number.isFinite(duration) && duration > 0
+          ? Math.min(extra.seconds, duration)
+          : extra.seconds)
+        expectedSeek = { position: extra.seconds, at: now }
+      } else {
+        quietUntil = now + tuning.echoMs
+      }
 
       window.postMessage({ channel: CHANNEL, kind: 'command', command: name, ...extra }, '*')
     }
@@ -289,6 +303,9 @@
       settleUntil = performance.now() + tuning.cooldownMs
       seekCost = tuning.initialSeekCost
       seekedAt = null
+      expectedSeek = null
+      nativeSeek = false
+      awaitingSeek = null
       /* A new title can be a new player, which may feel differently about
          having its rate set. Ask again rather than carrying a verdict over. */
       rateHonoured = true
@@ -297,59 +314,43 @@
       askForRoom(key ?? null)
     }
 
-    /**
-     * Did the person in front of the tab just do something?
-     *
-     * The only genuinely hard judgement here. Our own corrections move the
-     * player too, and a correction reported back as a fresh intent is a loop:
-     * everyone seeks, everyone reports the seek, everyone seeks again. So a
-     * change only counts as the person's when it happens outside the window in
-     * which we were moving things ourselves.
-     */
+    /** Spot a completed scrub even while paused or just after buffering. */
     function detectLocalIntent(next) {
-      /* Waited for long enough. A player that never did as it was asked must
-         not go on silencing the person sitting in front of it. */
-      if (expecting && performance.now() - expecting.at > tuning.expectMs) expecting = null
-
-      if (performance.now() < quietUntil) return null
-      if (next.buffering) return null
+      const now = performance.now()
+      if (expecting && now - expecting.at > tuning.expectMs) expecting = null
       if (reported.paused === null) return null
 
-      if (next.paused !== reported.paused) {
-        /* Exactly the change we asked for, arriving. Ours, not theirs. */
-        if (expecting && expecting.paused === next.paused) {
-          expecting = null
-          return null
+      const moved = next.position - reported.position
+      const elapsed = Math.max(0, next.at - reported.at) / 1000
+      const rate = Number.isFinite(next.rate) && next.rate > 0 ? next.rate : 1
+      const naturalAdvance = reported.paused ? 0 : elapsed * rate
+      const seeked = nativeSeek
+        ? Math.abs(moved) >= NATIVE_SEEK_SECONDS
+        : moved < -tuning.scrubSeconds || moved > naturalAdvance + tuning.scrubSeconds
+
+      if (expectedSeek) {
+        const afterTarget = next.position - expectedSeek.position
+        const age = now - expectedSeek.at
+        const advanceSinceCommand = next.paused ? 0 : Math.min(age / 1000 * rate, 1.5)
+        if (afterTarget >= -SEEK_ECHO_SECONDS && afterTarget <= advanceSinceCommand + SEEK_ECHO_SECONDS) {
+          // Only the observed arrival at our own target is an echo. A
+          // different destination is still allowed to become the room seek.
+          if (seeked || nativeSeek) {
+            expectedSeek = null
+            return null
+          }
         }
-        return next.paused
-          ? { action: 'pause', position: next.position }
-          : { action: 'play', position: next.position }
+        if (seeked || age > tuning.cooldownMs) expectedSeek = null
       }
 
-      if (!next.paused) {
-        /*
-         * A scrub is a position playback could not have reached — which is not
-         * the same as a position merely behind where it ought to be.
-         *
-         * Comparing against the expected position alone gets this wrong in the
-         * case that matters most: a stalled player reports the same timestamp
-         * twice, so after a few seconds it looks exactly like somebody dragged
-         * the bar backwards. Reporting that makes everybody seek to a stalled
-         * player's position — which stalls them, which they report, and the
-         * room walks itself backwards. A stall has to be indistinguishable
-         * from nothing happening, because that is what it is.
-         *
-         * So: backwards is a scrub, and forwards faster than the wall clock is
-         * a scrub. Forwards but slow is a player having a hard time.
-         */
-        const elapsed = (next.at - reported.at) / 1000
-        const moved = next.position - reported.position
-        if (moved < -tuning.scrubSeconds || moved > elapsed + tuning.scrubSeconds) {
-          return { action: 'seek', position: next.position }
-        }
-      }
+      if (seeked) return { action: 'seek', position: next.position }
+      if (now < quietUntil || next.paused === reported.paused) return null
 
-      return null
+      if (expecting && expecting.paused === next.paused) {
+        expecting = null
+        return null
+      }
+      return { action: next.paused ? 'pause' : 'play', position: next.position }
     }
 
     function onPlayerState(next) {
@@ -366,11 +367,17 @@
 
       /* Not a title: an advert, a trailer on a browse page, nothing loaded.
          Stand down rather than hold the room to it. */
-      if (!next.ready) return
-      if (window.__huddleMatchesRoom && !window.__huddleMatchesRoom(room)) {
+      if (!next.ready || (window.__huddleMatchesRoom && !window.__huddleMatchesRoom(room))) {
         reported = { paused: null, position: 0, at: 0 }
+        nativeSeek = false
+        expectedSeek = null
         return
       }
+
+      if (next.seekEvent === 'seeked') nativeSeek = true
+      // Keep the last stable timestamp. A buffering report can already show
+      // the destination, making the jump invisible once playback recovers.
+      if (next.seeking || next.buffering) return
 
       /* The player can reset the rate on its own — a new source, its own UI,
          an advert ending. Believing our last request would mean never asking
@@ -394,10 +401,30 @@
       }
 
       const intent = previous && previous.ready ? detectLocalIntent(next) : null
+      nativeSeek = false
       if (intent) {
-        /* Ours now — do not read the room's echo of it back as another intent. */
-        quietUntil = performance.now() + 600
-        chrome.runtime.sendMessage({ kind: 'control', control: intent }).catch(() => undefined)
+        if (intent.action === 'seek' && room?.item) {
+          // While the control crosses the network, the old room clock must
+          // not seek the initiating player back to its previous position.
+          awaitingSeek = {
+            seq: room.seq,
+            position: intent.position,
+            until: performance.now() + ROOM_REPLY_MS,
+          }
+        } else {
+          quietUntil = performance.now() + 600
+        }
+        const pending = awaitingSeek
+        const rejected = () => {
+          if (intent.action !== 'seek' || !pending || pending !== awaitingSeek) return
+          awaitingSeek = null
+          askForRoom(titleKey)
+        }
+        chrome.runtime.sendMessage({
+          kind: 'control', control: intent, roomId: room?.roomId, itemId: room?.item?.id,
+        }).then((reply) => {
+          if (reply?.ok === false) rejected()
+        }, rejected)
       }
 
       reported = { paused: next.paused, position: next.position, at: next.at }
@@ -422,19 +449,32 @@
 
       if (!player || !player.ready || !room || !room.item) return
       if (window.__huddleMatchesRoom && !window.__huddleMatchesRoom(room)) return
+      if (player.seeking || player.buffering) return
+      if (awaitingSeek && performance.now() < awaitingSeek.until) return
+
+      // A new room seek is a control, so drift cooldown and the previous
+      // seek's reissue guard do not apply. Coalesce seeks while the player
+      // is loading and follow the latest room position once it is ready.
+      if (roomSeek && room.playing === !player.paused) {
+        roomSeek = false
+        const position = target()
+        if (Math.abs(position - player.position) >= tuning.softSeconds) {
+          setRate(1)
+          command('seek', { seconds: position }, true)
+          return
+        }
+      }
 
       /* The room is paused, or nothing is on. */
       if (!room.playing) {
         setRate(1)
         if (!player.paused) command('pause')
-        else if (!player.buffering && performance.now() >= settleUntil &&
+        else if (performance.now() >= settleUntil &&
           Math.abs(room.position - player.position) >= tuning.softSeconds) {
           command('seek', { seconds: room.position })
         }
         return
       }
-
-      if (player.buffering) return
 
       /*
        * The room is running and this player is not. Start it — and note where
@@ -520,32 +560,27 @@
     /* The worker pushes the room down as it changes, with the clock offset —
        the offset is measured up there, where the socket is. */
     chrome.runtime.onMessage.addListener((message) => {
-      if (message?.kind === 'room') {
-        room = message.snapshot
-        offset = message.offset ?? 0
-        roomAt = performance.now()
-        /*
-         * Deliberately does not start a cooldown.
-         *
-         * It used to: any change to the room set the full five-second
-         * correction settle, on the reasoning that a control someone pressed
-         * means the player is about to move on purpose and reading that as
-         * drift would spend a second correction on top of it.
-         *
-         * That reasoning is about our *own* echo, and the brake for it belongs
-         * where the command is issued — which is where it now is. Applied to
-         * every incoming change it did something much worse, because
-         * `correct()` tests the cooldown after the paused-room branch and
-         * before the play and seek ones: obeying somebody's pause was instant,
-         * and obeying their play or their scrub waited out the whole five
-         * seconds. One person pressing play and the rest of the room sitting
-         * still for five seconds is the entire "play pause very delayed"
-         * complaint, and the asymmetry with pause is what gave it away.
-         *
-         * Following a control somebody deliberately pressed is not drift
-         * correction and must not share its brake.
-         */
+      if (message?.kind !== 'room') return
+      const incoming = message.snapshot
+      const sameSession = incoming && room && incoming.roomId === room.roomId && incoming.epoch === room.epoch
+      if (sameSession && incoming.seq < room.seq) return
+      const sameItem = sameSession && incoming.item?.id === room.item?.id
+
+      if (!sameItem) {
+        awaitingSeek = null
+        roomSeek = false
+      } else if (awaitingSeek && incoming.seq > awaitingSeek.seq && incoming.by?.action === 'seek') {
+        // While two local seeks are in flight, an echo for the first must
+        // not move the player away from the more recent destination.
+        if (Math.abs(incoming.position - awaitingSeek.position) < SEEK_ECHO_SECONDS) awaitingSeek = null
       }
+      if (incoming?.by?.action === 'seek' && (!sameItem || incoming.seq > room.seq)) {
+        roomSeek = true
+      }
+
+      room = incoming
+      offset = message.offset ?? 0
+      roomAt = performance.now()
     })
 
     /*

@@ -11,17 +11,22 @@
     if (ad?.getClientRects().length) return null
     return { video: videos[0], key: match[1] }
   }
-  setInterval(() => {
+  function report(event) {
     const active = playback()
     const video = active?.video
+    if (event && (!video || event.target !== video)) return
     window.postMessage({
       channel: 'huddle', kind: 'state', at: performance.now(),
       titleKey: active?.key ?? null, ready: !!active,
       position: video?.currentTime ?? 0, duration: video?.duration ?? 0,
       paused: video?.paused ?? true, rate: video?.playbackRate ?? 1,
+      seeking: !!video?.seeking, seekEvent: event?.type,
       buffering: !!video && !video.paused && video.readyState < 3,
     }, '*')
-  }, 250)
+  }
+  setInterval(report, 250)
+  document.addEventListener?.('seeking', report, true)
+  document.addEventListener?.('seeked', report, true)
   window.addEventListener('message', event => {
     if (event.source !== window) return
     const data = event.data

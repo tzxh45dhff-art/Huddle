@@ -69,6 +69,7 @@ const WATCHABLE = [
 /** Push the room to every watchable tab. They own correcting; we own this. */
 async function broadcast(message = { kind: 'room', snapshot, offset, status }) {
   const tabs = await chrome.tabs.query({ url: WATCHABLE })
+  if (message.kind === 'room' && (message.snapshot !== snapshot || message.status !== status)) return
   for (const tab of tabs) {
     if (tab.id === undefined) continue
     chrome.tabs
@@ -273,10 +274,12 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         respond({ ok: false, error: 'Connection lost — controls were not sent.' })
         return
       }
-      /* The room decides what happens; this only asks. The echo comes back as
-         a `watch:state` like anybody else's, which is what keeps one tab from
-         being a special case. */
-      socket?.emit('watch:control', { roomId: config.roomId, ...message.control })
+      if (!snapshot?.item || message.roomId !== config.roomId || message.itemId !== snapshot.item.id) {
+        respond({ ok: false, error: 'The room switched titles before this control arrived.' })
+        return
+      }
+      const { action, position } = message.control ?? {}
+      socket.emit('watch:control', { roomId: config.roomId, action, position })
       respond({ ok: true })
       return
     }

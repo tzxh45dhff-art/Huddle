@@ -35,7 +35,10 @@ test('disconnected controls are not buffered and stale snapshots are cleared', a
   await new Promise(resolve => setImmediate(resolve))
   assert.ok(pushed.some(value => value.status === 'disconnected' && value.snapshot === null))
   socket.connected = true
-  assert.equal((await send({ kind: 'control', control: { action: 'pause', position: 1200 } })).ok, true)
+  listeners['watch:state']({ roomId: 'room', item: { id: 'fixture-item' }, position: 1200 })
+  const pause = { kind: 'control', roomId: 'room', control: { action: 'pause', position: 1200 } }
+  assert.equal((await send({ ...pause, itemId: 'previous-item' })).ok, false)
+  assert.equal((await send({ ...pause, itemId: 'fixture-item' })).ok, true)
   assert.equal(sent.at(-1)[0], 'watch:control')
   const announcement = { kind: 'announce', title: 'Fixture', url: 'https://example.test', position: 1234.5 }
   assert.equal((await send(announcement)).ok, false, 'an older API cannot start the title at zero')
