@@ -17,6 +17,7 @@ import * as moments from '../models/moment.model.js'
 import { presenceFor } from '../services/presence.service.js'
 import { socketUser } from './presence.gateway.js'
 import { roomGuard } from './roomAuth.js'
+import { watchStageRoom } from './watch.gateway.js'
 
 /**
  * The small, silly things people do while standing around in a room together:
@@ -172,7 +173,7 @@ export function attachFunGateway(io: Server) {
       const body = (raw ?? {}) as Record<string, unknown>
       const roomId = await may(body.roomId)
       if (!roomId || !isReaction(body.reaction) || !allow()) return
-      io.to(roomId).emit('fun:react', { id: randomUUID(), roomId, from: self, reaction: body.reaction, at: Date.now() })
+      io.to([roomId, watchStageRoom(roomId)]).emit('fun:react', { id: randomUUID(), roomId, from: self, reaction: body.reaction, at: Date.now() })
     })
 
     /*

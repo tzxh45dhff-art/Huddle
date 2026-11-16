@@ -884,6 +884,7 @@ export function DashboardPage() {
 
       {call.status === 'live' && floating && (
         <FloatingCall
+          watchRoomId={activity === 'watch' ? activeRoomId : null}
           stream={floating.stream}
           name={floating.name}
           muted={floating.muted}

@@ -20,6 +20,8 @@
     } catch {}
     return null
   }
+  globalThis.__huddleStreamingIdentity = identity
+  if (typeof window === 'undefined') return
   window.__huddleRoomUrl = room => identity(room?.item?.ref) ? room.item.ref : null
   window.__huddleMatchesRoom = room => {
     const local = identity(location.href)

@@ -16,7 +16,7 @@ import { socketUser } from './presence.gateway.js'
  */
 
 /** Watchers get playback events; everyone else in the room only gets invites. */
-const stageRoom = (roomId: string) => `watch:${roomId}`
+export const watchStageRoom = (roomId: string) => `watch:${roomId}`
 
 function toItem(row: {
   id: string
@@ -79,7 +79,7 @@ export function attachWatchGateway(io: Server) {
    */
   onPublished((file, entry) => {
     for (const roomId of watch.roomsShowing(isLocalCopyOf(file))) {
-      io.to(stageRoom(roomId)).emit(
+      io.to(watchStageRoom(roomId)).emit(
         'watch:state',
         watch.apply(roomId, { id: 'huddle', name: '' }, { action: 'upgrade', ref: entry.url, subtitles: entry.subtitles ?? [] }),
       )
@@ -125,7 +125,7 @@ export function attachWatchGateway(io: Server) {
     }
 
     const pushState = (roomId: string) => {
-      io.to(stageRoom(roomId)).emit('watch:state', watch.snapshot(roomId))
+      io.to(watchStageRoom(roomId)).emit('watch:state', watch.snapshot(roomId))
     }
 
     const pushQueue = async (roomId: string) => {
@@ -156,7 +156,7 @@ export function attachWatchGateway(io: Server) {
     const leaveStage = (roomId: string) => {
       if (!staged.has(roomId)) return
       staged.delete(roomId)
-      void socket.leave(stageRoom(roomId))
+      void socket.leave(watchStageRoom(roomId))
       watch.removeViewer(roomId, socket.id)
       pushViewers(roomId)
       /* Emptying the stage pauses the room, so tell whoever is left. */
@@ -174,11 +174,11 @@ export function attachWatchGateway(io: Server) {
     socket.on('watch:open', async (raw: unknown) => {
       const roomId = roomIdFrom(raw)
       if (!roomId || staged.has(roomId) || opening.has(roomId)) return
-      if (!(await may(roomId))) return
+      if (!(await may(roomId)) || staged.has(roomId) || opening.has(roomId)) return
 
       opening.add(roomId)
       try {
-        await socket.join(stageRoom(roomId))
+        await socket.join(watchStageRoom(roomId))
         staged.add(roomId)
       } finally {
         opening.delete(roomId)
@@ -200,6 +200,7 @@ export function attachWatchGateway(io: Server) {
         })
       }
 
+      socket.emit('watch:stream-ready', { roomId })
       socket.emit('watch:state', watch.apply(roomId, self, { action: 'open' }))
       await pushQueue(roomId)
       pushViewers(roomId)
@@ -267,7 +268,7 @@ export function attachWatchGateway(io: Server) {
           return
       }
 
-      io.to(stageRoom(roomId)).emit('watch:state', watch.apply(roomId, self, control))
+      io.to(watchStageRoom(roomId)).emit('watch:state', watch.apply(roomId, self, control))
     })
 
     /** Put a specific queue item on, now. */
@@ -281,13 +282,38 @@ export function attachWatchGateway(io: Server) {
       const row = await queueModel.findQueueItem(roomId, itemId)
       if (!row) return
 
-      io.to(stageRoom(roomId)).emit(
-        'watch:state',
-        watch.apply(roomId, self, {
-          action: 'load', item: await toItemWithTracks(row),
-          position: numberFrom(raw, 'position'),
-        }),
-      )
+      const position = numberFrom(raw, 'position')
+      const item = await toItemWithTracks(row)
+      const current = watch.snapshot(roomId)
+      const state = position === undefined && current.item?.id === itemId
+        ? watch.apply(roomId, self, { action: 'play' })
+        : watch.apply(roomId, self, { action: 'load', item, position })
+      io.to(watchStageRoom(roomId)).emit('watch:state', state)
+    })
+
+    // A distinct, acknowledged event keeps an older server from loading
+    // a streaming title at zero after silently ignoring its start position.
+    socket.on('watch:stream-start', async (raw: unknown, ack: unknown) => {
+      if (typeof ack !== 'function') return
+      const roomId = roomIdFrom(raw)
+      if (!roomId || !staged.has(roomId)) return ack({ ok: false, error: 'Reconnect to the watch room.' })
+      const position = numberFrom(raw, 'position')
+      const { itemId } = raw as { itemId?: unknown }
+      if (typeof itemId !== 'string' || position === undefined || position < 0) {
+        return ack({ ok: false, error: 'The player is still loading. Try again when it is ready.' })
+      }
+
+      try {
+        const row = await queueModel.findQueueItem(roomId, itemId)
+        if (row?.source !== 'external' || !staged.has(roomId) || !socket.connected) {
+          return ack({ ok: false, error: 'Could not start this streaming title in the room.' })
+        }
+        const state = watch.apply(roomId, self, { action: 'load', item: toItem(row), position })
+        io.to(watchStageRoom(roomId)).emit('watch:state', state)
+        ack({ ok: true })
+      } catch {
+        ack({ ok: false, error: 'The server could not load the streaming title. Try again.' })
+      }
     })
 
     /**
@@ -308,7 +334,7 @@ export function attachWatchGateway(io: Server) {
       if (!current.item) return
 
       const next = await queueModel.nextInQueue(roomId, current.item.id)
-      io.to(stageRoom(roomId)).emit(
+      io.to(watchStageRoom(roomId)).emit(
         'watch:state',
         watch.apply(roomId, self, {
           action: 'advance',
@@ -324,7 +350,7 @@ export function attachWatchGateway(io: Server) {
       for (const roomId of watch.dropSocket(socket.id)) {
         const state = watch.snapshot(roomId)
         io.to(roomId).emit('watch:viewers', { roomId, viewers: state.viewers })
-        io.to(stageRoom(roomId)).emit('watch:state', state)
+        io.to(watchStageRoom(roomId)).emit('watch:state', state)
       }
       staged.clear()
     })

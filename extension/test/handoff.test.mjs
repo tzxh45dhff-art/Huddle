@@ -38,6 +38,7 @@ function boot({ storage = {}, storageThrows = false, api = 'https://api.example'
     document: {
       getElementById: (id) => (id === 'huddle-extension-bridge' ? node : null),
       documentElement: {},
+      addEventListener() {},
     },
     location: { origin: 'https://huddle-sync.vercel.app' },
     MutationObserver: class {

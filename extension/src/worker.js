@@ -1,4 +1,5 @@
 import { io } from './socket-lib.js'
+import './title-match.js'
 
 /**
  * The connection, and the clock.
@@ -30,6 +31,7 @@ let offset = 0
 let snapshot = null
 let config = { server: '', token: '', roomId: '', roomCode: '' }
 let status = 'idle'
+let streamReady = false
 
 const state = () => ({ status, offset, snapshot, config: { ...config, token: config.token ? '…' : '' } })
 
@@ -65,12 +67,12 @@ const WATCHABLE = [
 ]
 
 /** Push the room to every watchable tab. They own correcting; we own this. */
-async function broadcast() {
+async function broadcast(message = { kind: 'room', snapshot, offset, status }) {
   const tabs = await chrome.tabs.query({ url: WATCHABLE })
   for (const tab of tabs) {
     if (tab.id === undefined) continue
     chrome.tabs
-      .sendMessage(tab.id, { kind: 'room', snapshot, offset, status })
+      .sendMessage(tab.id, message)
       .catch(() => undefined)
   }
 }
@@ -129,6 +131,14 @@ function connect() {
     measureClock()
   })
 
+  socket.on('watch:stream-ready', (incoming) => {
+    streamReady = incoming?.roomId === config.roomId
+  })
+
+  socket.on('fun:react', (event) => {
+    if (event?.roomId === config.roomId) void broadcast({ kind: 'reaction', event })
+  })
+
   socket.on('watch:state', (incoming) => {
     if (incoming?.roomId !== config.roomId) return
     snapshot = incoming
@@ -137,6 +147,7 @@ function connect() {
 
   socket.on('disconnect', () => {
     status = 'disconnected'
+    streamReady = false
     snapshot = null
     void broadcast()
   })
@@ -148,6 +159,7 @@ function connect() {
 }
 
 function disconnect() {
+  streamReady = false
   if (resyncTimer !== null) {
     clearInterval(resyncTimer)
     resyncTimer = null
@@ -174,15 +186,16 @@ function disconnect() {
  */
 async function announce(title, url, position) {
   if (!socket?.connected) throw new Error('Connection lost — wait for Huddle to reconnect.')
-  if (!config.server || !config.token || !config.roomId) {
-    throw new Error('Not connected — set up the extension from its popup first.')
-  }
+  if (!streamReady) throw new Error('Huddle’s server needs the streaming update. If it was just restarted, reconnect and try again.')
+  if (!Number.isFinite(position) || position < 0) throw new Error('Wait for the video to finish loading, then try again.')
+  const connection = socket
+  const { server, token, roomId } = config
 
-  const response = await fetch(`${config.server}/api/rooms/${config.roomId}/watch/queue`, {
+  const response = await fetch(`${server}/api/rooms/${roomId}/watch/queue`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.token}`,
+      Authorization: `Bearer ${token}`,
       'ngrok-skip-browser-warning': 'true',
     },
     body: JSON.stringify({ source: 'external', ref: url, title }),
@@ -193,14 +206,13 @@ async function announce(title, url, position) {
   const itemId = body?.item?.id
   if (!itemId) throw new Error('The server did not say what it added.')
 
-  if (!socket?.connected) throw new Error('Connection lost — the title was queued but not started.')
-
-  /* Same event the app's own "play now" sends — the room does not know or
-     care that this came from a tab instead of a click. */
-  socket?.emit('watch:load', {
-    roomId: config.roomId, itemId,
-    position: Number.isFinite(position) ? Math.max(0, position) : 0,
-  })
+  if (connection !== socket || !connection.connected || !streamReady) {
+    throw new Error('The room connection changed. The title was queued but playback did not start.')
+  }
+  const reply = await connection.timeout(5000)
+    .emitWithAck('watch:stream-start', { roomId, itemId, position })
+    .catch(() => null)
+  if (!reply?.ok) throw new Error(reply?.error ?? 'The room did not confirm the start. Check the connection and try again.')
 }
 
 /** Turn a room code into the id every socket event is keyed on. */
@@ -230,6 +242,29 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       } catch (error) {
         respond({ ok: false, error: error?.message ?? String(error) })
       }
+      return
+    }
+
+    if (message?.kind === 'watch-focus') {
+      if (message.roomId !== config.roomId || !_sender.tab || !socket?.connected) {
+        respond({ watching: false })
+        return
+      }
+      const item = snapshot?.item
+      const expected = item?.source === 'external' && globalThis.__huddleStreamingIdentity(item.ref)
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [])
+      respond({
+        watching: active?.id === _sender.tab.id ||
+          Boolean(expected && expected === globalThis.__huddleStreamingIdentity(active?.url)),
+      })
+      return
+    }
+
+    if (message?.kind === 'react') {
+      if (socket?.connected && snapshot?.item?.id === message.itemId) {
+        socket.emit('fun:react', { roomId: config.roomId, reaction: message.reaction })
+      }
+      respond({ ok: true })
       return
     }
 

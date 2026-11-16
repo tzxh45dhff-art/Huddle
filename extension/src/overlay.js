@@ -41,6 +41,11 @@
  */
 ;(() => {
   const CHANNEL = 'huddle'
+  const reactions = [
+    ['laugh', '😂', 'Laughing'], ['cry', '😭', 'Crying'], ['shock', '😱', 'Shocked'],
+    ['love', '😍', 'Loving it'], ['fire', '🔥', 'Fire'], ['clap', '👏', 'Applause'],
+    ['dead', '💀', 'Dead'], ['popcorn', '🍿', 'Popcorn'],
+  ]
 
   let latest = { player: null, room: null, offset: 0, status: null, heard: false }
 
@@ -102,6 +107,21 @@
           color: #9a9aa0;
         }
         .stats.open { display: block; }
+        .reactions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 8px; }
+        .reactions button { background: #ffffff12; font-size: 17px; padding: 4px; }
+        .reactions button:hover, .reactions button:focus-visible { background: #ffffff28; }
+        .burst {
+          position: fixed; left: 20px; bottom: 12vh; pointer-events: none; max-width: 80vw;
+          box-shadow: 0 8px 24px #0008; background: #141418ed; color: white;
+          padding: 8px 12px; border-radius: 12px; font-size: 18px;
+          animation: rise 3.2s ease both;
+        }
+        @keyframes rise {
+          from { opacity: 0; transform: translateY(12px); }
+          12%, 75% { opacity: 1; }
+          to { opacity: 0; transform: translateY(-30px); }
+        }
+        @media (prefers-reduced-motion: reduce) { .burst { animation: none; } }
         .stats b { color: #eee; font-weight: 600; }
         .stats .warn { color: #fbbf24; }
         .toggle {
@@ -126,16 +146,23 @@
           <div class="label">Following</div>
           <div class="value" id="followingTitle"></div>
           <button class="ghost" id="resync">Resync now</button>
+          <div id="reactions" class="reactions" role="group" aria-label="Watch party reactions">
+            ${reactions.map(([id, glyph, label]) => `<button type="button" data-reaction="${id}" aria-label="${label}" title="${label}">${glyph}</button>`).join('')}
+          </div>
         </div>
         <div id="err" class="err" style="display:none;"></div>
         <div class="toggle" id="statsToggle">Show sync detail</div>
         <div class="stats" id="stats"></div>
       </div>
+      <div id="bursts" aria-live="polite"></div>
       <div class="pill" id="pill"><span class="dot" id="dot"></span><span id="pillText">Huddle</span></div>
     `
 
     document.documentElement.appendChild(host)
     return {
+      host,
+      bursts: root.getElementById('bursts'),
+      reactions: root.getElementById('reactions'),
       pill: root.getElementById('pill'),
       panel: root.getElementById('panel'),
       dot: root.getElementById('dot'),
@@ -158,6 +185,23 @@
 
   function mount() {
     const el = buildPanel()
+    const follows = () => latest.room?.item && latest.player?.ready &&
+      window.__huddleMatchesRoom?.(latest.room)
+    const followFullscreen = () => {
+      const full = document.fullscreenElement ?? document.webkitFullscreenElement
+      const target = full && !['VIDEO', 'IFRAME'].includes(full.tagName) ? full : document.documentElement
+      if (el.host.parentNode !== target) target.appendChild(el.host)
+    }
+    document.addEventListener('fullscreenchange', followFullscreen)
+    document.addEventListener('webkitfullscreenchange', followFullscreen)
+    followFullscreen()
+
+    el.reactions.addEventListener('click', (event) => {
+      const reaction = event.target.closest('button[data-reaction]')?.dataset.reaction
+      if (!reaction || !follows()) return
+      chrome.runtime.sendMessage({ kind: 'react', reaction, itemId: latest.room.item.id }).catch(() => undefined)
+    })
+
     let open = true
     el.panel.classList.toggle('open', true)
     let busy = false
@@ -171,9 +215,17 @@
       busy = true
       render()
       el.err.style.display = 'none'
+      const player = latest.player
+      if (!player?.ready || player.buffering || !Number.isFinite(player.position)) {
+        busy = false
+        el.err.textContent = 'Wait for the video to finish loading, then try again.'
+        el.err.style.display = 'block'
+        render()
+        return
+      }
       const title = el.detectedTitle.textContent || cleanTitle()
       const result = await chrome.runtime
-        .sendMessage({ kind: 'announce', title, url: location.href, position: latest.player?.position })
+        .sendMessage({ kind: 'announce', title, url: location.href, position: player.position })
         .catch((error) => ({ ok: false, error: error?.message ?? String(error) }))
       busy = false
       if (!result?.ok) {
@@ -252,13 +304,14 @@
         el.offTitleHint.style.display = onWatchPage ? 'none' : 'block'
         if (onWatchPage) {
           if (document.activeElement !== el.detectedTitle) el.detectedTitle.textContent = cleanTitle()
-          el.announce.disabled = busy || !connected
+          el.announce.disabled = busy || !connected || !!player.buffering
           el.announce.textContent = busy ? 'Starting…' : 'Start the room on this'
         }
       } else {
         /* Left visible off a title page on purpose — it is useful to see what
            the room is on even from Browse, as the reason to go open it. */
         el.followingTitle.textContent = room.item.title
+        el.reactions.style.display = follows() ? 'grid' : 'none'
         el.resync.disabled = !onWatchPage || !player || player.buffering
       }
 
@@ -307,6 +360,16 @@
     })
 
     chrome.runtime.onMessage.addListener((message) => {
+      if (message?.kind === 'reaction' && follows() && message.event?.roomId === latest.room.roomId) {
+        const glyph = reactions.find(([id]) => id === message.event.reaction)?.[1]
+        if (!glyph) return
+        const toast = document.createElement('div')
+        toast.className = 'burst'
+        toast.textContent = `${glyph} ${message.event.from?.name ?? ''}`
+        el.bursts.replaceChildren(toast)
+        setTimeout(() => toast.remove(), 3200)
+        return
+      }
       if (message?.kind === 'room') {
         latest = {
           ...latest,

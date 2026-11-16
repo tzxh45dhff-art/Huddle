@@ -138,3 +138,14 @@ observer.observe(document.documentElement, {
 })
 
 void sync()
+
+
+// Share only whether the foreground tab is watching this room's title.
+document.addEventListener('huddle:watch-focus', async () => {
+  const node = document.getElementById(BRIDGE_ID)
+  if (!node?.dataset.roomId) return
+  const result = await chrome.runtime.sendMessage({ kind: 'watch-focus', roomId: node.dataset.roomId }).catch(() => null)
+  if (document.getElementById(BRIDGE_ID) === node) {
+    node.dispatchEvent(new CustomEvent('huddle:watch-focus-result', { detail: result?.watching === true }))
+  }
+})

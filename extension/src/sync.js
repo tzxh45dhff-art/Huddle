@@ -427,6 +427,10 @@
       if (!room.playing) {
         setRate(1)
         if (!player.paused) command('pause')
+        else if (!player.buffering && performance.now() >= settleUntil &&
+          Math.abs(room.position - player.position) >= tuning.softSeconds) {
+          command('seek', { seconds: room.position })
+        }
         return
       }
 

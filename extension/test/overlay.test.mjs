@@ -22,7 +22,7 @@ import vm from 'node:vm'
 const src = readFileSync(new URL('../src/overlay.js', import.meta.url), 'utf8')
 
 const IDS = [
-  'joinTitle', 'pill', 'panel', 'dot', 'pillText', 'status', 'idleRow', 'followingRow',
+  'bursts', 'reactions', 'joinTitle', 'pill', 'panel', 'dot', 'pillText', 'status', 'idleRow', 'followingRow',
   'onTitle', 'offTitleHint', 'detectedTitle', 'followingTitle', 'announce',
   'resync', 'err', 'statsToggle', 'stats',
 ]

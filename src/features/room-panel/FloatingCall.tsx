@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Maximize2, MicOff, Minimize2, VideoOff, WifiOff, X } from 'lucide-react'
+import { Maximize2, MicOff, Minimize2, PictureInPicture2, VideoOff, WifiOff, X } from 'lucide-react'
+
+import { WatchCallWindow } from './WatchCallWindow'
 
 import { cn } from '@/lib/utils'
 
@@ -108,6 +110,14 @@ function useFullscreenHost(): Element {
   return host
 }
 
+function watchPictureInPicture() {
+  return (window as Window & {
+    documentPictureInPicture?: {
+      requestWindow(options: { width: number; height: number }): Promise<Window>
+    }
+  }).documentPictureInPicture
+}
+
 export function FloatingCall({
   stream,
   name,
@@ -116,6 +126,7 @@ export function FloatingCall({
   failed = false,
   isSelf = false,
   onClose,
+  watchRoomId,
 }: {
   stream: MediaStream | null
   name: string
@@ -124,9 +135,51 @@ export function FloatingCall({
   failed?: boolean
   isSelf?: boolean
   onClose: () => void
+  watchRoomId: string | null
 }) {
   const shell = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
+  const [watchWindow, setWatchWindow] = useState<Window | null>(null)
+  const [openingWatchWindow, setOpeningWatchWindow] = useState(false)
+  const [watchWindowFailed, setWatchWindowFailed] = useState(false)
+  const openRequest = useRef(0)
+
+  useEffect(() => {
+    return () => { openRequest.current += 1 }
+  }, [watchRoomId])
+
+  useEffect(() => {
+    if (!watchWindow) return
+    const returnToPage = () => setWatchWindow(null)
+    watchWindow.addEventListener('pagehide', returnToPage, { once: true })
+    return () => {
+      watchWindow.removeEventListener('pagehide', returnToPage)
+      watchWindow.close()
+    }
+  }, [watchWindow, watchRoomId])
+
+  useEffect(() => {
+    setWatchWindow(null)
+    setOpeningWatchWindow(false)
+    setWatchWindowFailed(false)
+  }, [watchRoomId])
+
+  async function floatForWatch() {
+    const pip = watchPictureInPicture()
+    if (!pip || !watchRoomId || openingWatchWindow) return
+    const request = ++openRequest.current
+    setOpeningWatchWindow(true)
+    setWatchWindowFailed(false)
+    try {
+      const target = await pip.requestWindow({ width: 300, height: 212 })
+      if (openRequest.current === request) setWatchWindow(target)
+      else target.close()
+    } catch {
+      if (openRequest.current === request) setWatchWindowFailed(true)
+    } finally {
+      if (openRequest.current === request) setOpeningWatchWindow(false)
+    }
+  }
 
   /* Where this is allowed to be drawn right now. Changing it re-parents the
      window, which is a remount — see the two effects that depend on it. */
@@ -169,7 +222,7 @@ export function FloatingCall({
     }
     /* `host` for the same reason as the stream below: the replacement node
        carries no transform, so it would otherwise paint at the origin. */
-  }, [stored.corner, size.width, size.height, place, host])
+  }, [stored.corner, size.width, size.height, place, host, watchWindow])
 
   useEffect(() => {
     try {
@@ -187,16 +240,16 @@ export function FloatingCall({
     if (video.current && video.current.srcObject !== stream) {
       video.current.srcObject = stream
     }
-  }, [stream, host])
+  }, [stream, host, watchWindow])
 
   /* Escape closes, matching every other dismissible layer in the app. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && !document.fullscreenElement && !watchWindow) onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, watchWindow])
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     /* Left button or touch only — a right-click drag is not a gesture anyone
@@ -265,7 +318,12 @@ export function FloatingCall({
     setStored((current) => ({ ...current, corner: next }))
   }
 
-  const live = stream && !cameraOff && !failed
+  const live = !!stream && !cameraOff && !failed
+
+  if (watchWindow && watchRoomId) {
+    return <WatchCallWindow target={watchWindow} roomId={watchRoomId} stream={stream}
+      live={live} isSelf={isSelf} name={isSelf ? 'You' : name} />
+  }
 
   return createPortal(
     <div
@@ -320,6 +378,19 @@ export function FloatingCall({
       {/* Controls ride above the video and stop drags of their own, so a tap
           on the close button is never read as the start of a move. */}
       <div className="absolute inset-x-0 top-0 flex justify-end gap-1 p-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 hover:opacity-100">
+        {watchRoomId && watchPictureInPicture() && (
+          <button
+            type="button"
+            aria-label="Float call for this watch party"
+            title="Float call for this watch party"
+            disabled={openingWatchWindow}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => void floatForWatch()}
+            className="grid size-6 place-items-center rounded-md bg-black/70 text-chalk hover:bg-black/90"
+          >
+            <PictureInPicture2 aria-hidden className="size-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onPointerDown={(event) => event.stopPropagation()}
@@ -340,6 +411,11 @@ export function FloatingCall({
         </button>
       </div>
 
+      {watchWindowFailed && (
+        <span role="status" className="absolute inset-x-1 top-8 rounded bg-black/85 p-1 text-center text-[0.65rem] text-chalk">
+          Couldn’t open the floating window.
+        </span>
+      )}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/85 to-transparent px-2 pb-1.5 pt-5">
         <span className="min-w-0 flex-1 truncate text-[0.68rem] font-medium text-chalk">
           {isSelf ? 'You' : name}
