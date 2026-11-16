@@ -60,7 +60,7 @@ export function TrackCard({
       <button
         type="button"
         onClick={onPlay}
-        aria-label={`Play ${track.title}`}
+        aria-label={`${current && playing ? 'Pause' : 'Play'} ${track.title}`}
         className={cn(
           'relative aspect-square w-full overflow-hidden rounded-xl bg-white/[0.05] outline-none ring-1 ring-inset transition-all duration-300 focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-signal',
           current ? 'ring-signal/50' : 'ring-white/10 group-hover/card:ring-white/20',

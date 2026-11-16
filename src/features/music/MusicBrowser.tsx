@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   Check,
   Heart,
+  House,
+  History,
   Link2,
   ListMusic,
   Loader2,
@@ -12,7 +14,6 @@ import {
   Plus,
   Search,
   Shuffle,
-  Sparkles,
   Trash2,
   Upload,
   X,
@@ -39,16 +40,19 @@ import {
 } from '@/features/music/types'
 import type { useLibrary } from '@/features/music/useLibrary'
 import { cn } from '@/lib/utils'
+import { MusicHome } from './MusicHome'
+import './music-home.css'
 
 const EASE = [0.16, 1, 0.3, 1] as const
 
-type View = 'search' | 'liked' | 'playlists' | 'suggested'
+type View = 'home' | 'search' | 'liked' | 'playlists' | 'recent'
 
 const NAV: { id: View; label: string; icon: typeof Search }[] = [
+  { id: 'home', label: 'Home', icon: House },
   { id: 'search', label: 'Search', icon: Search },
   { id: 'liked', label: 'Liked', icon: Heart },
   { id: 'playlists', label: 'Playlists', icon: ListMusic },
-  { id: 'suggested', label: 'Suggested', icon: Sparkles },
+  { id: 'recent', label: 'Recent', icon: History },
 ]
 
 /** A YouTube result, in the shape the rest of the app stores songs in. */
@@ -94,15 +98,16 @@ function shuffle<T>(items: T[]): T[] {
  */
 export function MusicBrowser({
   library,
-  onSectionChange,
+  onOpenQueue,
+  onOpenPlayer,
 }: {
   library: ReturnType<typeof useLibrary>
-  /** Lets the shell colour its header for whichever view is showing. */
-  onSectionChange?: (view: View) => void
+  onOpenQueue: () => void
+  onOpenPlayer: () => void
 }) {
-  const { roomId, snapshot, canSearch, onQueued, queue } = useMusic()
+  const { roomId, snapshot, canSearch, onQueued, queue, playPause } = useMusic()
 
-  const [view, setView] = useState<View>('search')
+  const [view, setView] = useState<View>('home')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<TrackSearchResult[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -116,48 +121,49 @@ export function MusicBrowser({
    */
   const [openPlaylistId, setOpenPlaylistId] = useState<string | null>(null)
   const openPlaylist = library.playlists.find((one) => one.id === openPlaylistId) ?? null
-  const [suggestions, setSuggestions] = useState<{
-    history: LibraryTrack[]
-    more: TrackSearchResult[]
-  } | null>(null)
+  const [recent, setRecent] = useState<LibraryTrack[] | null>(null)
+  const [recentLoading, setRecentLoading] = useState(true)
+  const [recentFailed, setRecentFailed] = useState(false)
+  const [recentRefresh, setRecentRefresh] = useState(0)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   /* The song waiting on a playlist that does not exist yet. */
   const [newListFor, setNewListFor] = useState<LibraryTrack | null>(null)
   const [newListName, setNewListName] = useState('')
 
   const filePicker = useRef<HTMLInputElement>(null)
-  const searchField = useRef<HTMLInputElement>(null)
 
   const current = snapshot?.track ?? null
   const playing = snapshot?.playing ?? false
 
+  const showingRecent = view === 'home' || view === 'recent'
   useEffect(() => {
-    onSectionChange?.(view)
-  }, [view, onSectionChange])
+    if (!showingRecent || !roomId) return
+    let active = true
+    setRecentLoading(true)
+    setRecentFailed(false)
+    musicApi.fetchSuggestions(roomId)
+      .then(({ history }) => { if (active) setRecent(history) })
+      .catch(() => { if (active) setRecentFailed(true) })
+      .finally(() => { if (active) setRecentLoading(false) })
+    return () => { active = false }
+  }, [showingRecent, roomId, queue.length, recentRefresh])
 
-  useEffect(() => {
-    if (view === 'search') searchField.current?.focus()
-  }, [view])
+  const suggested = useMemo(() => {
+    const displayed = new Set((recent ?? []).slice(0, 8).map(trackKey))
+    if (current) displayed.add(trackKey(current))
+    const picks: LibraryTrack[] = []
+    for (const playlist of library.playlists) {
+      for (const track of playlist.tracks) {
+        const key = trackKey(track)
+        if (displayed.has(key)) continue
+        displayed.add(key)
+        picks.push(track)
+        if (picks.length === 12) return picks
+      }
+    }
+    return picks
+  }, [recent, library.playlists, current])
 
-  /* Suggestions follow whatever is on — the seed is the current artist, so the
-     list is a continuation of this song rather than a fixed shelf. */
-  useEffect(() => {
-    if (view !== 'suggested' || !roomId) return
-    setBusy(true)
-    musicApi
-      .fetchSuggestions(roomId, current?.artist)
-      .then(setSuggestions)
-      .catch(() => setSuggestions({ history: [], more: [] }))
-      .finally(() => setBusy(false))
-  }, [view, roomId, current?.artist])
-
-  /**
-   * Put a song on now.
-   *
-   * Everything reachable from here is a `LibraryTrack`, not a queue row — so
-   * playing means adding it to the room's queue first and letting the normal
-   * pending-id path start it, exactly as the picker does.
-   */
   /**
    * Put a song in the room's queue, and optionally on right now.
    *
@@ -207,8 +213,11 @@ export function MusicBrowser({
   )
 
   const play = useCallback(
-    (track: LibraryTrack) => void enqueue(track, true),
-    [enqueue],
+    (track: LibraryTrack) => {
+      if (current && trackKey(current) === trackKey(track)) playPause()
+      else void enqueue(track, true)
+    },
+    [enqueue, current, playPause],
   )
 
   const runSearch = useCallback(async () => {
@@ -290,7 +299,7 @@ export function MusicBrowser({
   const heading = useMemo(() => NAV.find((entry) => entry.id === view)!, [view])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="music-browser flex min-h-0 flex-1 flex-col">
       <input
         ref={filePicker}
         type="file"
@@ -355,13 +364,14 @@ export function MusicBrowser({
         orientation.
       */}
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <nav className="flex shrink-0 gap-1 overflow-x-auto px-4 pb-2 pt-1 md:w-52 md:flex-col md:overflow-visible md:px-4 md:pb-6 md:pt-2">
+        <nav aria-label="Music navigation" data-lenis-prevent className="music-navigation flex shrink-0 gap-1 overflow-x-auto px-4 pb-2 pt-1 md:w-52 md:flex-col md:overflow-visible md:px-4 md:pb-6 md:pt-2">
           {NAV.map((entry) => {
             const Icon = entry.icon
             const active = view === entry.id
             return (
               <button
                 key={entry.id}
+                aria-current={active ? 'page' : undefined}
                 type="button"
                 onClick={() => {
                   setView(entry.id)
@@ -387,6 +397,9 @@ export function MusicBrowser({
             )
           })}
 
+          <button type="button" onClick={onOpenQueue} className="music-nav-queue">
+            <ListMusic size={16} aria-hidden /> Queue <span>{queue.length}</span>
+          </button>
           <div className="hidden md:mt-auto md:block md:px-1">
             <button
               type="button"
@@ -409,7 +422,7 @@ export function MusicBrowser({
           </div>
         </nav>
 
-        <div className="flex min-h-0 flex-1 flex-col px-4 pb-2 md:px-6">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pb-2 md:px-6">
           <AnimatePresence mode="wait">
             <motion.div
               key={openPlaylist ? `playlist-${openPlaylist.id}` : view}
@@ -419,7 +432,7 @@ export function MusicBrowser({
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.3, ease: EASE }}
             >
-              <div className="shrink-0 pb-3">
+              <div className={view === 'home' ? 'hidden' : 'shrink-0 pb-3'}>
                 {openPlaylist && (
                   <button
                     type="button"
@@ -478,7 +491,8 @@ export function MusicBrowser({
                       className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-dusk"
                     />
                     <input
-                      ref={searchField}
+                      autoFocus
+                      aria-label="Search songs or paste a link"
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       placeholder={
@@ -499,6 +513,10 @@ export function MusicBrowser({
                 </form>
               )}
 
+              {view === 'search' && <button type="button" onClick={() => filePicker.current?.click()} disabled={uploadProgress !== null}
+                className="mb-3 flex w-fit items-center gap-2 text-sm text-mist md:hidden">
+                <Upload size={15} aria-hidden />{uploadProgress !== null ? `Uploading ${Math.round(uploadProgress * 100)}%` : 'Upload a track'}
+              </button>}
               {error && (
                 <p
                   role="alert"
@@ -520,6 +538,17 @@ export function MusicBrowser({
                         void library.removeFromPlaylist(openPlaylist.id, trackId)
                       }
                     />
+                  ) : view === 'home' ? (
+                    <MusicHome
+                      current={current} playing={playing} recent={recent} suggested={suggested}
+                      loading={recentLoading} failed={recentFailed} liked={library.liked} rowProps={rowProps}
+                      onRetry={() => setRecentRefresh(value => value + 1)}
+                      onSearch={() => setView('search')}
+                      onHistory={() => setView('recent')}
+                      onLiked={() => setView('liked')}
+                      onPlaylists={() => setView('playlists')}
+                      onOpenPlayer={onOpenPlayer}
+                    />
                   ) : view === 'search' ? (
                     <SearchView results={results} rowProps={rowProps} queued={queue.length} />
                   ) : view === 'liked' ? (
@@ -531,10 +560,11 @@ export function MusicBrowser({
                       onImport={importLink}
                     />
                   ) : (
-                    <SuggestedView
-                      suggestions={suggestions}
-                      busy={busy}
-                      seed={current?.artist ?? null}
+                    <RecentView
+                      tracks={recent}
+                      busy={recentLoading}
+                      failed={recentFailed}
+                      onRetry={() => setRecentRefresh(value => value + 1)}
                       rowProps={rowProps}
                     />
                   )}
@@ -1048,70 +1078,18 @@ function PlaylistDetail({
   )
 }
 
-function SuggestedView({
-  suggestions,
-  busy,
-  seed,
-  rowProps,
-}: {
-  suggestions: { history: LibraryTrack[]; more: TrackSearchResult[] } | null
+function RecentView({ tracks, busy, rowProps, failed, onRetry }: {
+  tracks: LibraryTrack[] | null
   busy: boolean
-  seed: string | null
+  failed: boolean
+  onRetry: () => void
   rowProps: RowProps
 }) {
-  if (busy && !suggestions) {
-    return (
-      <div className="grid place-items-center py-14">
-        <Loader2 aria-hidden className="size-5 animate-spin text-mist" />
-      </div>
-    )
-  }
-
-  const history = suggestions?.history ?? []
-  const more = suggestions?.more ?? []
-
-  if (history.length === 0 && more.length === 0) {
-    return (
-      <Empty
-        icon={Sparkles}
-        title="Nothing to suggest yet"
-        body="This list is built from what the room has actually played. Put a few songs on and it fills up."
-      />
-    )
-  }
-
-  return (
-    <>
-      {more.length > 0 && (
-        <>
-          {/*
-            Labelled for what it is. This is a search for more from the current
-            artist, not a model of anyone's taste — calling it "more like this"
-            would be claiming an understanding the app does not have.
-          */}
-          <p className="px-0.5 pb-2.5 pt-1 text-[0.7rem] uppercase tracking-[0.18em] text-dusk">
-            More from {seed}
-          </p>
-          <TrackGrid>
-            {more.map((result) => (
-              <TrackCard key={result.id} {...rowProps(fromSearch(result))} />
-            ))}
-          </TrackGrid>
-        </>
-      )}
-
-      {history.length > 0 && (
-        <>
-          <p className="px-0.5 pb-2.5 pt-4 text-[0.7rem] uppercase tracking-[0.18em] text-dusk">
-            Played in this room
-          </p>
-          <TrackGrid>
-            {history.map((track) => (
-              <TrackCard key={`${track.source}:${track.ref}`} {...rowProps(track)} />
-            ))}
-          </TrackGrid>
-        </>
-      )}
-    </>
-  )
+  if (!tracks && busy) return <div role="status" aria-label="Loading recent songs" className="grid place-items-center py-14"><Loader2 aria-hidden className="size-5 animate-spin text-mist" /></div>
+  return <>
+    {failed && <p role="alert" className="music-home-notice">Couldn’t load recent songs. <button onClick={onRetry}>Try again</button></p>}
+    {tracks?.length
+      ? <TrackGrid>{tracks.map(track => <TrackCard key={trackKey(track)} {...rowProps(track)} />)}</TrackGrid>
+      : !failed && <Empty icon={History} title="Your room’s recent picks" body="Songs added to your room’s queue and playlists appear here." />}
+  </>
 }

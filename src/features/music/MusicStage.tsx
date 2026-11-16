@@ -71,6 +71,8 @@ export function MusicStage({
     duration,
     volume,
     setVolume,
+    soundHeld,
+    error,
   } = useMusic()
   const library = useLibrary(roomId)
 
@@ -79,17 +81,6 @@ export function MusicStage({
 
   const track = snapshot?.track ?? null
   const palette = useCoverPalette(track?.artwork)
-
-  /* The record opens itself the first time something starts, then stays where
-     the listener last put it — arriving on a library while music begins behind
-     it reads as the app ignoring you. */
-  const [hasAutoExpanded, setHasAutoExpanded] = useState(false)
-  useEffect(() => {
-    if (track && !hasAutoExpanded) {
-      setExpanded(true)
-      setHasAutoExpanded(true)
-    }
-  }, [track, hasAutoExpanded])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -156,9 +147,8 @@ export function MusicStage({
       exit={{ opacity: 0 }}
       transition={{ duration: 0.3, ease: EASE }}
     >
-      {/* Translucent while browsing; the record view above draws its own solid
-          one, so opening a track closes the room off behind it. */}
-      <CoverAmbience palette={palette} translucent={!expanded} />
+      {/* A quiet backdrop keeps album art readable while browsing. */}
+      <div className="absolute inset-0 bg-[#121214]" />
 
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
@@ -166,7 +156,8 @@ export function MusicStage({
               top when it is up, so this never has to change identity. */}
           <header className="flex shrink-0 items-center justify-between gap-3 px-5 py-4">
             <span className="flex min-w-0 items-center gap-2">
-              {snapshot && snapshot.listeners.length > 0 && (
+              <span className="mr-2 flex items-center gap-2 font-display font-semibold text-chalk"><Music4 size={20} aria-hidden /> Music</span>
+              {connected && snapshot && snapshot.listeners.length > 0 && (
                 <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 backdrop-blur-md">
                   <span className="size-1.5 animate-signal-pulse rounded-full bg-emerald-400" />
                   <span className="text-[0.72rem] text-chalk">
@@ -180,7 +171,7 @@ export function MusicStage({
                   <span className="text-[0.72rem]">Reconnecting…</span>
                 </span>
               )}
-              {!snapshot && (
+              {connected && !snapshot && (
                 <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5">
                   <Loader2 aria-hidden className="size-3.5 animate-spin text-mist" />
                   <span className="text-[0.72rem] text-mist">Syncing…</span>
@@ -189,6 +180,14 @@ export function MusicStage({
             </span>
 
             <span className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQueueOpen(true)}
+                aria-label={`Open queue, ${queue.length} tracks`}
+                className="grid size-10 place-items-center rounded-full border border-white/10 text-chalk hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal md:hidden"
+              >
+                <ListMusic aria-hidden className="size-4" />
+              </button>
               {onTogglePanel && (
                 <button
                   type="button"
@@ -221,7 +220,9 @@ export function MusicStage({
             </span>
           </header>
 
-          <MusicBrowser library={library} />
+          {!expanded && error && <p role="alert" className="mx-5 mb-2 rounded-lg border border-signal/25 bg-signal/10 p-3 text-sm text-signal-bright">{error}</p>}
+          {!expanded && soundHeld && snapshot?.playing && <p className="mx-5 mb-2 text-sm text-mist">Tap anywhere to hear the room’s music.</p>}
+          <MusicBrowser key={roomId} library={library} onOpenQueue={() => setQueueOpen(true)} onOpenPlayer={() => setExpanded(true)} />
 
           {/*
             The bar between the two screens.
