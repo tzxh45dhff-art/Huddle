@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import * as watchApi from '@/features/watch/api'
 import { PosterCard, PosterGrid } from '@/features/watch/PosterCard'
 import { QueuePanel } from '@/features/watch/QueuePanel'
-import { StreamingSetup } from '@/features/watch/StreamingSetup'
+import { StreamingHub } from '@/features/watch/StreamingHub'
 import { formatTime, type LibraryEntry, type QueueItem, type ResolvedSource, type SearchResult, type WatchItem } from '@/features/watch/types'
 import { apiUrl } from '@/lib/config'
 
@@ -216,10 +216,12 @@ export function WatchBrowser({
         </section>
       )}
 
-      <section className="watch-shelf" aria-labelledby="watch-shelf-heading">
+      {section === 'streaming' && <StreamingHub key={roomId} roomId={roomId} current={current} ready={ready} visible={visible} />}
+
+      <section className={section === 'streaming' ? 'stream-paste watch-shelf' : 'watch-shelf'} aria-labelledby="watch-shelf-heading">
         <header className="watch-shelf-heading">
           <div>
-            <h2 id="watch-shelf-heading">{section === 'library' ? 'On the server' : section === 'search' ? 'Search & links' : section === 'streaming' ? 'Streaming services' : 'Up next'}</h2>
+            <h2 id="watch-shelf-heading">{section === 'library' ? 'On the server' : section === 'search' ? 'Search & links' : section === 'streaming' ? 'Have a streaming link?' : 'Up next'}</h2>
             {section === 'library' && library && <p>{library.length} {library.length === 1 ? 'video' : 'videos'}</p>}
           </div>
           {section === 'library' && (
@@ -307,8 +309,6 @@ export function WatchBrowser({
             </Empty>}
           </>
         )}
-
-        {section === 'streaming' && <div className="watch-streaming"><StreamingSetup /></div>}
 
         {section === 'queue' && (
           <QueuePanel

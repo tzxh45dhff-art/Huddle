@@ -353,7 +353,15 @@
       return { action: next.paused ? 'pause' : 'play', position: next.position }
     }
 
+    let lastHubReport = 0
     function onPlayerState(next) {
+      const identity = window.__huddleStreamingIdentity?.(location.href)
+      const now = performance.now()
+      if (next.ready && /^(?:prime|hotstar):/.test(identity ?? '') &&
+          (now - lastHubReport >= 1000 || next.paused !== player?.paused || next.seekEvent === 'seeked')) {
+        lastHubReport = now
+        chrome.runtime.sendMessage({ ...next, kind: 'movie-hub-media' }).catch(() => undefined)
+      }
       const previous = player
       player = next
 
@@ -560,6 +568,13 @@
     /* The worker pushes the room down as it changes, with the clock offset —
        the offset is measured up there, where the socket is. */
     chrome.runtime.onMessage.addListener((message) => {
+      if (message?.kind === 'movie-hub-seek') {
+        if (player?.ready && Number.isFinite(message.position) &&
+            window.__huddleStreamingIdentity?.(location.href) === message.identity) {
+          command('seek', { seconds: message.position }, true)
+        }
+        return
+      }
       if (message?.kind !== 'room') return
       const incoming = message.snapshot
       const sameSession = incoming && room && incoming.roomId === room.roomId && incoming.epoch === room.epoch

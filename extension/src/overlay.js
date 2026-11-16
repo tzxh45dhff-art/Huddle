@@ -375,6 +375,10 @@
     })
 
     chrome.runtime.onMessage.addListener((message) => {
+      if (message?.kind === 'movie-hub-error') {
+        el.err.textContent = String(message.error ?? 'The room could not switch.')
+        el.err.style.display = 'block'
+      }
       if (message?.kind === 'reaction' && follows() && message.event?.roomId === latest.room.roomId) {
         const glyph = reactions.find(([id]) => id === message.event.reaction)?.[1]
         if (!glyph) return

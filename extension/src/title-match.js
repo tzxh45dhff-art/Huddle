@@ -18,7 +18,7 @@
         return id ? 'netflix:' + id : null
       }
       if (host === 'primevideo.com' || host.endsWith('.primevideo.com') || /^(?:www\.)?amazon\.(?:com|co\.uk|in|de|co\.jp)$/.test(host)) {
-        id = /\/(?:detail|gp\/video\/detail)\/([A-Z0-9]+)/i.exec(url.pathname)?.[1]
+        id = /\/(?:detail|dp)\/([A-Z0-9]+)(?:\/|$)/i.exec(url.pathname)?.[1]
         return id ? 'prime:' + id.toUpperCase() : null
       }
     } catch {}

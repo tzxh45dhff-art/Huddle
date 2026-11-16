@@ -3,6 +3,7 @@ import { Router } from 'express'
 import * as musicController from '../controllers/music.controller.js'
 import * as studyController from '../controllers/study.controller.js'
 import * as roomController from '../controllers/room.controller.js'
+import * as streamingController from '../controllers/streaming.controller.js'
 import * as watchController from '../controllers/watch.controller.js'
 import { asyncHandler } from '../middleware/asyncHandler.js'
 import { byUser, rateLimit } from '../middleware/rateLimit.js'
@@ -37,7 +38,12 @@ roomRoutes.patch('/:id', asyncHandler(roomController.update))
 roomRoutes.post('/:id/join', asyncHandler(roomController.join))
 
 /* Watch: the queue and its lookups. Playback itself is on the socket. */
+const catalogLimit = rateLimit({ max: 50, windowMs: 10 * 60 * 1000, key: byUser, message: 'Too many catalog requests. Try again in a few minutes.' })
 roomRoutes.get('/:id/watch', asyncHandler(watchController.capabilities))
+roomRoutes.get('/:id/watch/streaming', catalogLimit, asyncHandler(streamingController.catalog))
+roomRoutes.get('/:id/watch/streaming/resume', asyncHandler(streamingController.resume))
+roomRoutes.put('/:id/watch/streaming/resume', asyncHandler(streamingController.progress))
+roomRoutes.get('/:id/watch/streaming/:catalogId', catalogLimit, asyncHandler(streamingController.details))
 roomRoutes.get('/:id/watch/search', asyncHandler(watchController.search))
 roomRoutes.post('/:id/watch/resolve', asyncHandler(watchController.resolve))
 roomRoutes.post('/:id/watch/upload', memberFirst, receiveVideo, asyncHandler(watchController.upload))

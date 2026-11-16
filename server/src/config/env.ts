@@ -51,6 +51,8 @@ export const env = {
    * public oEmbed endpoint, so the watch feature works without a key at all.
    */
   youtubeApiKey: process.env.YOUTUBE_API_KEY ?? '',
+  /** Optional Movie of the Night key. Huddle applies the free-plan request cap. */
+  streamingAvailabilityKey: process.env.STREAMING_AVAILABILITY_API_KEY?.trim() ?? '',
   /** Optional song discovery. Without it Guess the Song uses iTunes metadata. */
   lastfmApiKey: process.env.LASTFM_API_KEY ?? '',
   /** Optional Somewhere metadata lookup; never returned to the browser. */

@@ -30,6 +30,7 @@ const VERSION = chrome.runtime.getManifest().version
 
 /** The last thing successfully configured, so a re-read is not a re-connect. */
 let applied = ''
+let inFlight = null
 
 /** Where the app keeps its own session token. Same origin, so this can read it. */
 const APP_TOKEN_KEY = 'syncroom.token'
@@ -108,17 +109,20 @@ async function sync() {
 
   /* Nothing has changed since the last successful configure. Re-sending it
      would tear down a working socket to build the identical one. */
-  const key = `${api}|${roomId}`
+  const key = `${api}|${roomId}|${appToken() ?? ''}`
   if (key === applied) return
+  if (inFlight?.key === key) return inFlight.request
 
-  const token = await mintToken(api)
-  if (!token) return
-
-  const result = await chrome.runtime
-    .sendMessage({ kind: 'configure', server: api, roomId, roomName, token })
-    .catch(() => null)
-
-  if (result?.ok) applied = key
+  const request = mintToken(api).then(async token => {
+    if (!token || inFlight?.request !== request || document.getElementById(BRIDGE_ID) !== node ||
+        node.dataset.roomId !== roomId) return
+    const result = await chrome.runtime
+      .sendMessage({ kind: 'configure', server: api, roomId, roomName, token })
+      .catch(() => null)
+    if (result?.ok && inFlight?.request === request) applied = key
+  })
+  inFlight = { key, request }
+  try { await request } finally { if (inFlight?.request === request) inFlight = null }
 }
 
 /*
@@ -139,7 +143,6 @@ observer.observe(document.documentElement, {
 
 void sync()
 
-
 // Share only whether the foreground tab is watching this room's title.
 document.addEventListener('huddle:watch-focus', async () => {
   const node = document.getElementById(BRIDGE_ID)
@@ -148,4 +151,18 @@ document.addEventListener('huddle:watch-focus', async () => {
   if (document.getElementById(BRIDGE_ID) === node) {
     node.dispatchEvent(new CustomEvent('huddle:watch-focus-result', { detail: result?.watching === true }))
   }
+})
+
+document.addEventListener('huddle:movie-hub-launch', async (event) => {
+  const node = document.getElementById(BRIDGE_ID)
+  const request = event.detail
+  if (!node?.dataset.roomId || request?.roomId !== node.dataset.roomId || typeof request.id !== 'string') return
+  const current = await chrome.runtime.sendMessage({ kind: 'state' }).catch(() => null)
+  const api = (node.dataset.api || location.origin).replace(/\/$/, '')
+  if (current?.config?.roomId !== request.roomId || current?.config?.server !== api) applied = ''
+  await sync()
+  const reply = await chrome.runtime.sendMessage({ ...request, kind: 'movie-hub-launch' }).catch(() => null)
+  document.dispatchEvent(new CustomEvent('huddle:movie-hub-result', { detail: {
+    id: request.id, ok: reply?.ok === true, error: reply?.error,
+  } }))
 })

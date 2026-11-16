@@ -1,5 +1,6 @@
 import { io } from './socket-lib.js'
 import './title-match.js'
+import { createMovieHub } from './movie-hub.js'
 
 /**
  * The connection, and the clock.
@@ -33,6 +34,22 @@ let config = { server: '', token: '', roomId: '', roomCode: '' }
 let status = 'idle'
 let streamReady = false
 
+const movieHub = createMovieHub({
+  getConfig: () => config,
+  getSnapshot: () => snapshot,
+  canStart: () => socket?.connected && streamReady,
+  announce,
+  sendRoom: (id) => sendTab(id, { kind: 'room', snapshot, offset, status }),
+})
+
+function sendTab(tabId, message) {
+  if (movieHub.suppress(tabId)) {
+    if (message.kind === 'reaction') return
+    if (message.kind === 'room') message = { ...message, snapshot: null }
+  }
+  chrome.tabs.sendMessage(tabId, message).catch(() => undefined)
+}
+
 const state = () => ({ status, offset, snapshot, config: { ...config, token: config.token ? '…' : '' } })
 
 async function load() {
@@ -65,19 +82,20 @@ const WATCHABLE = [
   '*://*.amazon.com/gp/video/*',
   '*://*.amazon.co.uk/gp/video/*',
   '*://*.amazon.in/gp/video/*',
+  '*://*.amazon.in/dp/*',
+  '*://*.amazon.com/dp/*',
   '*://*.amazon.de/gp/video/*',
   '*://*.amazon.co.jp/gp/video/*',
 ]
 
 /** Push the room to every watchable tab. They own correcting; we own this. */
 async function broadcast(message = { kind: 'room', snapshot, offset, status }) {
+  await movieHub.load()
   const tabs = await chrome.tabs.query({ url: WATCHABLE })
   if (message.kind === 'room' && (message.snapshot !== snapshot || message.status !== status)) return
   for (const tab of tabs) {
     if (tab.id === undefined) continue
-    chrome.tabs
-      .sendMessage(tab.id, message)
-      .catch(() => undefined)
+    sendTab(tab.id, message)
   }
 }
 
@@ -188,7 +206,7 @@ function disconnect() {
  * extension tab, the queue list) treats it exactly the same either way — the
  * page just supplies a truer title than a person guessing from a bare URL.
  */
-async function announce(title, url, position) {
+async function announce(title, url, position, metadata = {}, stillSelected = () => true) {
   if (!socket?.connected) throw new Error('Connection lost — wait for Huddle to reconnect.')
   if (!streamReady) throw new Error('Huddle’s server needs the streaming update. If it was just restarted, reconnect and try again.')
   if (!Number.isFinite(position) || position < 0) throw new Error('Wait for the video to finish loading, then try again.')
@@ -202,7 +220,7 @@ async function announce(title, url, position) {
       Authorization: `Bearer ${token}`,
       'ngrok-skip-browser-warning': 'true',
     },
-    body: JSON.stringify({ source: 'external', ref: url, title }),
+    body: JSON.stringify({ source: 'external', ref: url, title, ...metadata }),
   })
   const body = await response.json().catch(() => null)
   if (!response.ok) throw new Error(body?.error ?? `Could not add that (${response.status})`)
@@ -210,7 +228,7 @@ async function announce(title, url, position) {
   const itemId = body?.item?.id
   if (!itemId) throw new Error('The server did not say what it added.')
 
-  if (connection !== socket || !connection.connected || !streamReady) {
+  if (connection !== socket || !connection.connected || !streamReady || !stillSelected()) {
     throw new Error('The room connection changed. The title was queued but playback did not start.')
   }
   const reply = await connection.timeout(5000)
@@ -239,8 +257,20 @@ async function resolveRoom(server, token, code) {
 
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   ;(async () => {
+    if (message?.kind === 'movie-hub-launch') {
+      respond(await movieHub.launch(message))
+      return
+    }
+
+    if (message?.kind === 'movie-hub-media') {
+      await movieHub.observe(message, _sender).catch(() => undefined)
+      respond({ ok: true })
+      return
+    }
+
     if (message?.kind === 'announce') {
       try {
+        if (_sender.tab?.id !== undefined) await movieHub.forget(_sender.tab.id)
         await announce(String(message.title ?? '').trim() || 'Untitled', String(message.url ?? ''), message.position)
         respond({ ok: true })
       } catch (error) {
@@ -250,6 +280,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     }
 
     if (message?.kind === 'watch-focus') {
+      await movieHub.load()
       if (message.roomId !== config.roomId || !_sender.tab || !socket?.connected) {
         respond({ watching: false })
         return
@@ -257,7 +288,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       const item = snapshot?.item
       const expected = item?.source === 'external' ? globalThis.__huddleStreamingIdentity(item.ref) : null
       const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => [])
-      let actual = globalThis.__huddleStreamingIdentity(active?.url)
+      let actual = movieHub.suppress(active?.id) ? null : globalThis.__huddleStreamingIdentity(active?.url)
       if (expected?.startsWith('net77:') && active?.id !== undefined &&
           /^https:\/\/(?:www\.)?(?:net77|net52)\.cc\//.test(active.url ?? '')) {
         const reply = await chrome.tabs.sendMessage(active.id, { kind: 'net77-active' }, { frameId: 0 }).catch(() => null)
@@ -304,9 +335,8 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
          * connected" and disabled the button that would have started
          * something — on a page where the socket was working the whole time.
          */
-        chrome.tabs
-          .sendMessage(tabId, { kind: 'room', snapshot, offset, status })
-          .catch(() => undefined)
+        await movieHub.load()
+        sendTab(tabId, { kind: 'room', snapshot, offset, status })
       }
       respond({ ok: true })
       return

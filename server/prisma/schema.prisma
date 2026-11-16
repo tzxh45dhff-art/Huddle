@@ -768,3 +768,36 @@ model RoomPet {
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 }
 
+
+/// Cached results from the streaming availability catalog.
+model StreamingCatalogPage {
+  key        String   @id
+  payload    String
+  expiresAt  DateTime
+  savedAt    DateTime @updatedAt
+
+  @@index([savedAt])
+}
+
+/// Requests reserved before contacting the upstream catalog, across restarts.
+model StreamingCatalogBudget {
+  month String @id
+  used  Int
+}
+
+/// Separate checkpoints for each viewer and each room.
+model StreamingCheckpoint {
+  scope     String
+  ownerId   String
+  mediaKey  String
+  title     String
+  ref       String
+  thumbnail String?
+  position  Float
+  duration  Float?
+  finished  Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@id([scope, ownerId, mediaKey])
+  @@index([scope, ownerId, updatedAt])
+}

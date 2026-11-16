@@ -4,7 +4,7 @@ import { useExtensionInstalled } from '@/features/watch/useExtensionInstalled'
 import { EXTENSION_STORE_URL } from '@/lib/config'
 import { cn } from '@/lib/utils'
 
-export function StreamingSetup() {
+export function StreamingSetup({ compact = false }: { compact?: boolean }) {
   const installed = useExtensionInstalled()
   const outdated = installed !== null && installed !== __EXTENSION_VERSION__
 
@@ -27,8 +27,10 @@ export function StreamingSetup() {
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <a className="watch-secondary" href="https://www.primevideo.com" target="_blank" rel="noopener noreferrer">Open Prime Video</a>
-        <a className="watch-secondary" href="https://www.hotstar.com/in" target="_blank" rel="noopener noreferrer">Open JioHotstar · Beta</a>
+        {!compact && <>
+          <a className="watch-secondary" href="https://www.primevideo.com" target="_blank" rel="noopener noreferrer">Open Prime Video</a>
+          <a className="watch-secondary" href="https://www.hotstar.com/in" target="_blank" rel="noopener noreferrer">Open JioHotstar · Beta</a>
+        </>}
         <a className="watch-secondary" href="https://net77.cc" target="_blank" rel="noopener noreferrer">Open Net77 · Beta</a>
       </div>
       <p className="mt-3 text-sm text-mist">Sign in to the service, play a film or episode, then choose “Start the room on this” in the Huddle panel. Friends can open the shared title from this room. Each viewer needs access to the title.</p>

@@ -20,6 +20,7 @@ test('disconnected controls are not buffered and stale snapshots are cleared', a
   const context = vm.createContext({ chrome, io: () => socket, setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {}, Date, URL, console, fetch: async () => { fetches += 1; return { ok: true, json: async () => ({ item: { id: 'fixture-item' } }) } } })
   const source = readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8').replace(/^import .*$/gm, '')
   vm.runInContext(readFileSync(new URL('../src/title-match.js', import.meta.url), 'utf8'), context)
+  vm.runInContext(readFileSync(new URL('../src/movie-hub.js', import.meta.url), 'utf8').replace(/^export /gm, ''), context)
   vm.runInContext(source, context)
   await new Promise(resolve => setImmediate(resolve))
   const send = (data, sender = {}) => new Promise(resolve => message(data, sender, resolve))
