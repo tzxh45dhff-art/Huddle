@@ -251,8 +251,8 @@
 @keyframes stream-spin { to { transform: rotate(1turn); } }
 .stream-footer { border-top: 1px solid var(--stream-line); margin-top: 1.5rem; padding-top: .9rem; }
 .stream-footer summary { width: fit-content; cursor: pointer; color: var(--stream-muted); font-size: .82rem; }
-.stream-footer > a { display: inline-block; margin: 1rem 0 0; color: var(--stream-muted); font-size: .7rem; }
-.stream-footer > a:hover { text-decoration: underline; }
+.stream-credits { display: flex; flex-wrap: wrap; gap: .4rem 1rem; margin-top: 1rem; color: var(--stream-muted); font-size: .7rem; }
+.stream-credits a:hover { text-decoration: underline; }
 .stream-dialog {
   position: fixed;
   inset: 0;
@@ -321,4 +321,4 @@
   .stream-spin { animation: none; }
 }
 
-.stream-footer > a svg { display: inline-block; width: .7rem; height: .7rem; vertical-align: -.08rem; }
+.stream-credits svg { display: inline-block; width: .7rem; height: .7rem; vertical-align: -.08rem; }

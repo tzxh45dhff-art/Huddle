@@ -344,7 +344,10 @@ export function StreamingHub({ roomId, current, ready, visible }: {
 
         <div className="stream-footer">
           <details><summary>Extension & playback setup</summary><StreamingSetup compact /></details>
-          {(page?.titles.length || results?.titles.length) ? <a href="https://www.movieofthenight.com/about/api" target="_blank" rel="noopener noreferrer">Streaming availability by Movie of the Night <ArrowUpRight aria-hidden /></a> : null}
+          {(page?.titles.length || results?.titles.length) ? <div className="stream-credits">
+            <a href="https://www.movieofthenight.com/about/api" target="_blank" rel="noopener noreferrer">Streaming availability by Movie of the Night <ArrowUpRight aria-hidden /></a>
+            <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">Additional artwork by TMDB <ArrowUpRight aria-hidden /></a>
+          </div> : null}
         </div>
       </div>
 

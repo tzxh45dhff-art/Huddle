@@ -40,6 +40,16 @@ const ttl = 24 * 60 * 60 * 1000
 const pending = new Map<string, Promise<{ value: unknown; source: Source }>>()
 const noPage: CatalogPage = { titles: [], next: null }
 
+// The catalog CDN can serve the wrong artwork even under the correct show ID.
+// Replace only the affected assets, using verified artwork for each exact series.
+const artworkCorrections = new Map<string, Partial<Pick<StreamTitle, 'poster' | 'backdrop'>>>([
+  ['24974419', { poster: 'https://image.tmdb.org/t/p/w500/tcPc5ZMBO4y2BtCJMe3o2nwZb2B.jpg' }], // Off Campus (TMDB tv/273240)
+  ['25946853', { // Carrie (2026; TMDB tv/288673)
+    poster: 'https://image.tmdb.org/t/p/w500/6mUMquPQBFJGqTACS3Azkwwrx8d.jpg',
+    backdrop: 'https://image.tmdb.org/t/p/w780/9yCJtipMeDe8uAdSJKvw8BnYfRz.jpg',
+  }],
+])
+
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
@@ -72,11 +82,35 @@ export function streamingIdentity(raw: string) {
   }
 }
 
-function art(value: unknown) {
-  try {
-    const url = new URL(short(value, 1500))
-    return url.protocol === 'https:' && !url.username && !url.password ? url.href : null
-  } catch { return null }
+function imageShowId(url: URL) {
+  if (url.hostname !== 'cdn.movieofthenight.com') return undefined
+  return /^\/show\/([^/]+)\//.exec(url.pathname)?.[1]
+}
+
+function art(id: string, ...values: unknown[]) {
+  for (const value of values) {
+    const url = URL.parse(short(value, 1500))
+    if (url?.protocol !== 'https:' || url.username || url.password) continue
+    const owner = imageShowId(url)
+    if (owner && owner !== id) continue
+    return url.href
+  }
+  return null
+}
+
+function correctedArtwork(item: StreamTitle): StreamTitle {
+  return {
+    ...item,
+    poster: art(item.id, item.poster),
+    backdrop: art(item.id, item.backdrop),
+    ...artworkCorrections.get(item.id),
+  }
+}
+
+export function correctedStreamingThumbnail(value: string | null) {
+  const url = value && URL.parse(value)
+  const id = url && imageShowId(url)
+  return (id && artworkCorrections.get(id)?.poster) || value
 }
 
 function offers(data: unknown, preferPlayback = true): StreamOffer[] {
@@ -104,7 +138,9 @@ function title(value: unknown): StreamTitle | null {
   if (!/^[a-z0-9_-]+$/i.test(id) || !title || (row.showType !== 'movie' && row.showType !== 'series')) return null
   const imageSet = object(row.imageSet)
   const poster = object(imageSet.verticalPoster)
+  const verticalBackdrop = object(imageSet.verticalBackdrop)
   const backdrop = object(imageSet.horizontalBackdrop)
+  const horizontalPoster = object(imageSet.horizontalPoster)
   const links = offers(row.streamingOptions, row.showType === 'movie')
   if (!links.length) return null
   return {
@@ -113,8 +149,8 @@ function title(value: unknown): StreamTitle | null {
     runtime: numeric(row.runtime),
     overview: short(row.overview, 900),
     genres: list(row.genres).map(value => short(object(value).name, 40)).filter(Boolean).slice(0, 6),
-    poster: art(poster.w360 ?? poster.w480 ?? poster.w600),
-    backdrop: art(backdrop.w1080 ?? backdrop.w720 ?? object(imageSet.horizontalPoster).w1080),
+    poster: art(id, poster.w360, poster.w480, poster.w600, poster.w720, poster.w240, verticalBackdrop.w480, verticalBackdrop.w360),
+    backdrop: art(id, backdrop.w1080, backdrop.w720, horizontalPoster.w1080, horizontalPoster.w720),
     offers: links,
   }
 }
@@ -188,7 +224,7 @@ async function fetchCached<T>(key: string, path: string, parse: (raw: unknown) =
 const digest = (value: string) => createHash('sha256').update(value).digest('base64url')
 const normalize = (value: string) => value.normalize('NFKC').trim().toLocaleLowerCase('en').replace(/\s+/g, ' ')
 
-export async function streamingCatalog(query: string, cursor: string) {
+async function lookupCatalog(query: string, cursor: string) {
   if (query) {
     const q = normalize(query)
     // Every already-fetched browse page is searchable without a catalog call.
@@ -249,7 +285,14 @@ export async function streamingCatalog(query: string, cursor: string) {
   return { titles: [...titles.values()], next: Object.keys(next).length ? Buffer.from(JSON.stringify(next)).toString('base64url') : null, source }
 }
 
+export async function streamingCatalog(query: string, cursor: string) {
+  const page = await lookupCatalog(query, cursor)
+  // Apply corrections when serving the response, including existing cached pages.
+  return { ...page, titles: page.titles.map(correctedArtwork) }
+}
+
 export async function streamingDetails(id: string) {
   const response = await fetchCached('details:' + id, '/shows/' + encodeURIComponent(id) + '?series_granularity=episode&country=in', parseDetails, { title: null, episodes: [] })
-  return { ...response.value, source: response.source }
+  const { title, episodes } = response.value
+  return { title: title && correctedArtwork(title), episodes, source: response.source }
 }

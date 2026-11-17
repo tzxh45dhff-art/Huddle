@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { prisma } from '../models/prisma.js'
 import { assertMembership } from '../services/room.service.js'
-import { streamingCatalog, streamingDetails, streamingIdentity } from '../services/streamingCatalog.service.js'
+import { correctedStreamingThumbnail, streamingCatalog, streamingDetails, streamingIdentity } from '../services/streamingCatalog.service.js'
 import { snapshot } from '../services/watch.service.js'
 import { HttpError } from '../utils/HttpError.js'
 
@@ -91,5 +91,8 @@ export async function resume(req: Request, res: Response) {
     select: { mediaKey: true, title: true, ref: true, thumbnail: true, position: true, duration: true, updatedAt: true },
   })
   const [personal, room] = await Promise.all([recent('viewer', req.userId!), recent('room', roomId)])
-  res.json({ personal, room })
+  const withArtwork = (item: typeof personal[number]) => ({
+    ...item, thumbnail: correctedStreamingThumbnail(item.thumbnail),
+  })
+  res.json({ personal: personal.map(withArtwork), room: room.map(withArtwork) })
 }
