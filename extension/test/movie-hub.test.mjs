@@ -53,6 +53,25 @@ test('room launch waits for the selected player and publishes its real time', as
   assert.equal(Boolean(hub.hub.suppress(1)), false)
 })
 
+test('NetMirror opens the selected show and shares only its actual playing episode', async (t) => {
+  const home = 'https://net77.cc/home'
+  const pick = home + '#huddle-net77-pick=80237957&title=Avatar'
+  const current = home + '#huddle-net77=80237957.1.2'
+  const hub = fixture(t)
+  assert.equal((await hub.launch(pick)).ok, true)
+  assert.deepEqual(hub.opening, [[1, pick]])
+  await hub.observe(home, 12, { netMirrorKey: '80237958.1.2' })
+  await hub.observe(home, 25, { netMirrorKey: '80237957.1.2', buffering: true })
+  assert.equal(hub.announcements.length, 0)
+  await hub.observe(home, 84, { netMirrorKey: '80237957.1.2', netMirrorTitle: 'Avatar · S1 E2' })
+  assert.deepEqual(hub.announcements.map(entry => entry.slice(0, 3)), [['Avatar · S1 E2', current, 84]])
+  const joining = fixture(t, current)
+  assert.equal((await joining.launch(pick)).ok, true)
+  await joining.observe(home, 87, { netMirrorKey: '80237957.1.2' })
+  assert.equal(joining.announcements.length, 0)
+  assert.equal(Boolean(joining.hub.suppress(1)), false)
+})
+
 test('private resume seeks to its checkpoint and never starts or changes the room', async (t) => {
   const hub = fixture(t, movie)
   assert.equal((await hub.launch(movie, 'solo', 900)).ok, true)

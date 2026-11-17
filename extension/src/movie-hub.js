@@ -3,13 +3,21 @@ const LAUNCH_LIFETIME = 10 * 60_000
 const SEEK_RETRY = 3500
 const CHECKPOINT_MS = 25_000
 
+function netMirrorIntent(url) {
+  if (!/^https:\/\/(?:www\.)?net77\.cc$/.test(url.origin) ||
+      url.pathname !== '/home' || url.username || url.password) return null
+  const pick = new URLSearchParams(url.hash.slice(1)).get('huddle-net77-pick')
+  return pick && /^[a-z0-9_-]{1,80}(?:\.\d{1,5}\.\d{1,5})?$/i.test(pick)
+    ? 'net77:' + pick.toLowerCase() : null
+}
+
 function providerIdentity(raw) {
   try {
     const url = new URL(raw)
     if (url.port || url.username || url.password ||
-        !/^(?:www\.)?(?:primevideo\.com|hotstar\.com|amazon\.(?:in|com))$/.test(url.hostname)) return null
+        !/^(?:www\.)?(?:primevideo\.com|hotstar\.com|net77\.cc|amazon\.(?:in|com))$/.test(url.hostname)) return null
     const identity = globalThis.__huddleStreamingIdentity(url.href)
-    return /^(?:prime|hotstar):/.test(identity ?? '') ? identity : null
+    return /^(?:prime|hotstar|net77):/.test(identity ?? '') ? identity : null
   } catch {
     return null
   }
@@ -77,12 +85,13 @@ export function createMovieHub({ getConfig, getSnapshot, canStart, announce, sen
         !['room', 'solo', 'join'].includes(input.mode)) return { ok: false, error: 'Open a supported title from this Huddle room.' }
 
     const url = await playbackUrl(input.url).catch(() => null)
-    const identity = url && providerIdentity(url.href)
+    const netMirror = url && netMirrorIntent(url)
+    const identity = url && (netMirror || providerIdentity(url.href))
     if (!identity) return { ok: false, error: 'The provider could not resolve this title. Open it on the provider and use the Huddle panel.' }
     if (getConfig().roomId !== config.roomId || getConfig().server !== config.server) {
       return { ok: false, error: 'The Huddle room changed while the title was opening.' }
     }
-    const ref = url.origin + url.pathname
+    const ref = identity.startsWith('net77:') ? url.href : url.origin + url.pathname
     const sameTitle = providerIdentity(getSnapshot()?.item?.ref) === identity
     const mode = input.mode === 'room' && sameTitle ? 'join' : input.mode
     if (mode === 'join' && !sameTitle) {
@@ -121,12 +130,18 @@ export function createMovieHub({ getConfig, getSnapshot, canStart, announce, sen
 
   async function observe(message, sender) {
     const tabId = sender.tab?.id
-    const identity = providerIdentity(sender.url)
+    const senderUrl = sender.url ?? ''
+    const netMirror = /^https:\/\/(?:www\.)?(?:net77|net52)\.cc\//.test(senderUrl) &&
+      (sender.frameId === undefined || sender.frameId === 0) && typeof message.netMirrorKey === 'string' &&
+      /^[a-z0-9_-]{1,80}(?:\.\d{1,5}\.\d{1,5})?$/i.test(message.netMirrorKey)
+    const ref = netMirror ? `https://net77.cc/home#huddle-net77=${message.netMirrorKey.toLowerCase()}` : senderUrl
+    const identity = providerIdentity(ref)
     if (tabId === undefined || !identity || !Number.isFinite(message.position) || !Number.isFinite(message.duration) ||
         message.duration <= 0 || message.duration > 86400 || message.position < 0 || message.position > message.duration + 1 ||
         !message.ready || message.buffering || message.seeking) return
-    const url = new URL(sender.url)
-    const ref = url.origin + url.pathname
+    const url = new URL(ref)
+    const canonical = netMirror ? ref : url.origin + url.pathname
+    if (identity.startsWith('net77:') && !netMirror) return
 
     await load()
     const config = getConfig()
@@ -137,7 +152,8 @@ export function createMovieHub({ getConfig, getSnapshot, canStart, announce, sen
       sendRoom(tabId)
       intent = undefined
     }
-    if (intent && identity !== intent.identity) return
+    if (intent && identity !== intent.identity &&
+        !(netMirror && identity.startsWith(`${intent.identity}.`))) return
 
     if (intent && !intent.starting && intent.position !== null) {
       const position = Math.min(message.duration, intent.position)
@@ -161,9 +177,18 @@ export function createMovieHub({ getConfig, getSnapshot, canStart, announce, sen
 
     if (intent?.mode === 'room') {
       if (message.paused || intent.starting || intent.failed || !canStart()) return
+      if (netMirror && providerIdentity(getSnapshot()?.item?.ref) === identity) {
+        // The catalog opens the series. Once an episode plays, recheck the
+        // exact identity so joining it leaves the room's playhead intact.
+        await forget(tabId)
+        sendRoom(tabId)
+        return
+      }
       intent.starting = true
       try {
-        await announce(intent.title, ref, message.position, {
+        const title = netMirror && typeof message.netMirrorTitle === 'string'
+          ? message.netMirrorTitle.trim().slice(0, 200) || intent.title : intent.title
+        await announce(title, canonical, message.position, {
           duration: Math.round(message.duration), thumbnail: intent.thumbnail,
         }, () => tabs.get(tabId) === intent)
         await forget(tabId)
@@ -182,6 +207,7 @@ export function createMovieHub({ getConfig, getSnapshot, canStart, announce, sen
       return
     }
 
+    if (netMirror) return // NetMirror catalog handoff does not create a streaming checkpoint.
     const item = getSnapshot()?.item
     const shared = intent?.mode !== 'solo' && item?.source === 'external' && providerIdentity(item.ref) === identity
     if ((!shared && intent?.mode !== 'solo') || !config.token || message.position < 5) return
@@ -195,7 +221,7 @@ export function createMovieHub({ getConfig, getSnapshot, canStart, announce, sen
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.token}`, 'ngrok-skip-browser-warning': 'true' },
       body: JSON.stringify({
-        url: ref, title: (intent?.title ?? item?.title ?? 'Streaming title').slice(0, 200),
+        url: canonical, title: (intent?.title ?? item?.title ?? 'Streaming title').slice(0, 200),
         thumbnail: intent?.thumbnail, position: message.position,
         duration: message.duration, shared, ended,
       }),

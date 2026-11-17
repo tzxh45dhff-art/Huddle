@@ -5,8 +5,9 @@ import {
 } from 'lucide-react'
 
 import { StreamingSetup } from './StreamingSetup'
+import { NetMirrorCatalog } from './NetMirrorCatalog'
 import {
-  catalogPage, openStreamingTitle, PROVIDERS, streamingDetails, streamingResume, streamKey,
+  catalogPage, netMirrorTitleUrl, openStreamingTitle, PROVIDERS, streamingDetails, streamingResume, streamKey,
   type CatalogPage, type Checkpoint, type StreamDetails, type StreamOffer, type StreamProvider, type StreamTitle,
   type ViewingRequest,
 } from './streaming'
@@ -17,7 +18,7 @@ import './streaming.css'
 type Filter = 'all' | StreamProvider
 type Kind = 'all' | StreamTitle['kind']
 
-const providerOf = (key: string) => key.startsWith('hotstar:') ? 'hotstar' : 'prime'
+const providerOf = (key: string) => key.startsWith('net77:') ? 'net77' : key.startsWith('hotstar:') ? 'hotstar' : 'prime'
 const yearLine = (item: StreamTitle) => [item.year, item.kind === 'series' ? 'Series' : item.runtime ? `${item.runtime} min` : 'Film', item.genres[0]].filter(Boolean).join('  ·  ')
 
 function ProviderMark({ provider }: { provider: StreamProvider }) {
@@ -124,6 +125,8 @@ export function StreamingHub({ roomId, current, ready, visible }: {
   const extension = useExtensionInstalled()
   const [major, minor] = (extension ?? '').split('.').map(Number)
   const installed = major > 0 || minor >= 8
+  const netMirrorInstalled = major > 0 || minor >= 9
+  const showOfficialCatalog = filter !== 'net77'
   const dialog = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLElement | null>(null)
 
@@ -136,7 +139,7 @@ export function StreamingHub({ roomId, current, ready, visible }: {
   }, [roomId, visible, refresh])
 
   useEffect(() => {
-    if (!visible || !query) return
+    if (!visible || !query || !showOfficialCatalog) return
     let active = true
     setResults(null)
     setSearchError(false)
@@ -144,7 +147,7 @@ export function StreamingHub({ roomId, current, ready, visible }: {
       .then((value) => { if (active) setResults(value) })
       .catch(() => { if (active) setSearchError(true) })
     return () => { active = false }
-  }, [roomId, visible, query, refresh])
+  }, [roomId, visible, query, refresh, showOfficialCatalog])
 
   useEffect(() => {
     if (!visible) return
@@ -231,12 +234,14 @@ export function StreamingHub({ roomId, current, ready, visible }: {
   const hero = browse.find(item => item.backdrop) ?? browse[0]
   const roomKey = current?.source === 'external' ? streamKey(current.ref) : null
   const roomProvider = roomKey ? providerOf(roomKey) : null
+  const roomOpenUrl = current && roomKey && roomProvider === 'net77' && netMirrorInstalled
+    ? netMirrorTitleUrl(roomKey.slice('net77:'.length), current.title) : current?.ref
   const chosenOffers = selected?.offers.filter(offer => filter === 'all' || offer.provider === filter) ?? []
   const seasons = [...new Set((details?.episodes ?? []).filter(episode => episode.offers.some(offer => filter === 'all' || offer.provider === filter)).map(episode => episode.season))]
   const selectedSeason = seasons.includes(season) ? season : seasons[0]
   const episodes = details?.episodes.filter(episode => episode.season === selectedSeason) ?? []
   const source = query ? results?.source : page?.source
-  const sourceMessage = source === 'limited' ? 'The free catalog limit has been reached. Previously loaded titles are still available.'
+  const sourceMessage = !showOfficialCatalog ? '' : source === 'limited' ? 'The free catalog limit has been reached. Previously loaded titles are still available.'
     : source === 'offline' ? 'The catalog feed is temporarily unavailable.'
     : source === 'unconfigured' ? 'The live catalog isn’t connected on this server.' : ''
 
@@ -253,14 +258,14 @@ export function StreamingHub({ roomId, current, ready, visible }: {
 
   return (
     <div className="stream-hub">
-      {!query && (
+      {!query && showOfficialCatalog && (
         <section className="stream-hero" aria-label="Featured streaming title">
           <div className="stream-hero-art"><Art src={hero?.backdrop ?? '/watch/streaming-marquee.jpg'} eager /></div>
           <div className="stream-hero-content">
             <div className="stream-overline"><span />{hero ? 'Featured in India' : 'Streaming in India'}</div>
             <h2>{hero?.title ?? <>Find your next<br />watch.</>}</h2>
             {hero ? <><span className="stream-hero-meta">{yearLine(hero)}</span><p>{hero.overview}</p></>
-              : <p>Choose a movie or series on Prime Video or JioHotstar and watch it with your room.</p>}
+              : <p>Choose a movie or series and watch it with your room.</p>}
             <div className="stream-hero-actions">
               {hero
                 ? <button type="button" className="stream-action" onClick={() => choose(hero)}><Play aria-hidden fill="currentColor" /> View title</button>
@@ -283,7 +288,7 @@ export function StreamingHub({ roomId, current, ready, visible }: {
           </form>
           <div className="stream-filters">
             <div className="stream-filter-pills" role="group" aria-label="Streaming service">
-              {(['all', 'hotstar', 'prime'] as const).map(provider => (
+              {(['all', 'hotstar', 'prime', 'net77'] as const).map(provider => (
                 <button key={provider} type="button" aria-pressed={provider === filter} onClick={() => setFilter(provider)}>{provider === 'all' ? 'All services' : PROVIDERS[provider].name}</button>
               ))}
             </div>
@@ -293,24 +298,28 @@ export function StreamingHub({ roomId, current, ready, visible }: {
           </div>
         </div>
 
-        {roomProvider && current && <div className="stream-current">
+        {roomProvider && current && roomOpenUrl && <div className="stream-current">
           <span className="stream-current-icon"><Users aria-hidden /></span>
           <span><small>On in this room</small><strong>{current.title}</strong></span>
-          {installed ? <button type="button" className="stream-link-button" disabled={!ready || opening}
-            onClick={() => void launch({ url: current.ref, title: current.title, mode: 'join' })}>Join now <ArrowRight aria-hidden /></button>
-          : <a className="stream-link-button" href={current.ref} target="_blank" rel="noopener noreferrer">Open on {PROVIDERS[roomProvider].name}<ArrowUpRight aria-hidden /></a>}
+          {(roomProvider === 'net77' ? netMirrorInstalled : installed) ? <button type="button" className="stream-link-button" disabled={!ready || opening}
+            onClick={() => void launch({ url: roomOpenUrl, title: current.title, mode: 'join' })}>Join now <ArrowRight aria-hidden /></button>
+          : <a className="stream-link-button" href={roomOpenUrl} target="_blank" rel="noopener noreferrer">Open on {PROVIDERS[roomProvider].name}<ArrowUpRight aria-hidden /></a>}
         </div>}
 
         {!selected && launchError && <p className="stream-notice" role="alert">{launchError}</p>}
         {sourceMessage && <p className="stream-notice" role="status">{sourceMessage}</p>}
 
-        {query ? (
+        {query && filter === 'net77' && <div className="stream-heading">
+          <h2>Results for “{query}”</h2>
+          <button type="button" className="stream-link-button" onClick={() => { setInput(''); setQuery('') }}><X aria-hidden /> Clear</button>
+        </div>}
+        {showOfficialCatalog && (query ? (
           <section className="stream-shelf" aria-label="Search results">
             <div className="stream-heading"><h2>Results for “{query}”</h2><button type="button" className="stream-link-button" onClick={() => { setInput(''); setQuery('') }}><X aria-hidden /> Clear</button></div>
             {!results && !searchError ? <p className="stream-notice" role="status"><Loader2 className="stream-spin" aria-hidden /> Checking availability…</p>
               : searchError ? <p className="stream-notice" role="alert">Couldn’t search the catalog. <button onClick={() => setRefresh(n => n + 1)}>Try again</button></p>
               : visibleResults.length ? <div className="stream-grid">{visibleResults.map(item => <TitleCard key={item.id} item={item} onChoose={choose} />)}</div>
-              : <div className="stream-empty"><Search aria-hidden /><div><strong>No matching titles{filter !== 'all' || kind !== 'all' ? ' with these filters' : ''}</strong>
+              : <div className="stream-empty"><Search aria-hidden /><div><strong>{filter === 'all' ? 'No matches on Prime Video or JioHotstar' : 'No matching titles with these filters'}</strong>
                 <p>Try another title, or open the provider and use the Huddle panel when it plays.</p>
                 <div className="stream-empty-links">{Object.entries(PROVIDERS).map(([id, provider]) => <a key={id} href={provider.url} target="_blank" rel="noopener noreferrer">{provider.name} <ArrowUpRight aria-hidden /></a>)}</div>
               </div></div>}
@@ -340,7 +349,14 @@ export function StreamingHub({ roomId, current, ready, visible }: {
               {more ? <Loader2 className="stream-spin" aria-hidden /> : <ArrowDown aria-hidden />}{more ? 'Loading titles…' : 'Load more titles'}
             </button>}
           </>
-        )}
+        ))}
+
+        {visible && (filter === 'all' || filter === 'net77') && <NetMirrorCatalog
+          roomId={roomId} query={query} kind={kind} installed={netMirrorInstalled} active={filter === 'net77'}
+          busy={!ready || opening} onChoose={(item, poster) => void launch({
+            url: netMirrorTitleUrl(item.id, item.title), title: item.title, mode: 'room', thumbnail: poster,
+          })}
+        />}
 
         <div className="stream-footer">
           <details><summary>Extension & playback setup</summary><StreamingSetup compact /></details>

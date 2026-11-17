@@ -166,3 +166,16 @@ document.addEventListener('huddle:movie-hub-launch', async (event) => {
     id: request.id, ok: reply?.ok === true, error: reply?.error,
   } }))
 })
+
+document.addEventListener('huddle:net77-catalog', async (event) => {
+  const node = document.getElementById(BRIDGE_ID)
+  const request = event.detail
+  if (!node?.dataset.roomId || request?.roomId !== node.dataset.roomId || typeof request.id !== 'string') return
+  const reply = await chrome.runtime.sendMessage({
+    kind: 'net77-catalog', query: request.query, type: request.type,
+  }).catch(() => null)
+  if (document.getElementById(BRIDGE_ID) !== node || node.dataset.roomId !== request.roomId) return
+  document.dispatchEvent(new CustomEvent('huddle:net77-catalog-result', { detail: {
+    id: request.id, status: reply?.status ?? 'unavailable', items: reply?.items,
+  } }))
+})

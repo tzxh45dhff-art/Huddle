@@ -84,6 +84,7 @@
   line-height: 1;
 }
 .stream-mark-hotstar { color: #ffd1dd; }
+.stream-mark-net77 { color: #ffc4ad; }
 .stream-content { padding: 0 clamp(1rem, 5cqw, 4.5rem) 2.75rem; }
 .stream-toolbar { display: flex; justify-content: space-between; gap: .9rem; flex-wrap: wrap; padding-bottom: 1.3rem; }
 .stream-search-form, .stream-filters, .stream-filter-pills, .stream-type { display: flex; align-items: center; gap: .45rem; }
@@ -109,7 +110,7 @@
 .stream-search-form button { background: #392832; color: #fff3f3; }
 .stream-search-form button:hover:enabled { background: #513741; }
 .stream-filters { flex-wrap: wrap; }
-.stream-filter-pills { gap: .17rem; padding: .2rem; border: 1px solid var(--stream-line); border-radius: .55rem; }
+.stream-filter-pills { flex-wrap: wrap; gap: .17rem; padding: .2rem; border: 1px solid var(--stream-line); border-radius: .55rem; }
 .stream-filter-pills button { color: var(--stream-muted); }
 .stream-filter-pills button:hover, .stream-filter-pills button[aria-pressed=true] { color: #fff8f7; background: #34272d; }
 .stream-type { padding: .15rem .45rem .15rem .6rem; }
@@ -313,6 +314,7 @@
   .stream-search-form { max-width: none; }
   .stream-content { padding-inline: .85rem; }
   .stream-filters { width: 100%; }
+  .stream-filter-pills button { padding-inline: .42rem; font-size: .73rem; }
   .stream-current { padding: .5rem; gap: .45rem; }
   .stream-current .stream-link-button { font-size: .76rem; }
 }

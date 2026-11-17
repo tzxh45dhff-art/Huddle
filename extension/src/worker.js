@@ -262,6 +262,22 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
       return
     }
 
+    if (message?.kind === 'net77-catalog') {
+      const tabs = await chrome.tabs.query({ url: [
+        'https://net77.cc/*', 'https://www.net77.cc/*',
+      ] }).catch(() => [])
+      const tab = tabs.find(candidate => /^https:\/\/(?:www\.)?net77\.cc\/(?:home|movies|series)(?:[/?#]|$)/.test(candidate.url ?? ''))
+      if (tab?.id === undefined) {
+        respond({ status: 'closed' })
+        return
+      }
+      const result = await chrome.tabs.sendMessage(tab.id, {
+        kind: 'net77-catalog', query: message.query, type: message.type,
+      }, { frameId: 0 }).catch(() => null)
+      respond(result ?? { status: 'unavailable' })
+      return
+    }
+
     if (message?.kind === 'movie-hub-media') {
       await movieHub.observe(message, _sender).catch(() => undefined)
       respond({ ok: true })

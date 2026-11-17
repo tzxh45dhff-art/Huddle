@@ -33,6 +33,8 @@
   }
 
   let active = null
+  let lastCatalogReport = 0
+  const catalogLaunch = /^#huddle-net77-pick=/.test(location.hash ?? '')
   const events = ['seeking', 'seeked', 'play', 'pause']
   window.__huddleNet77Title = () => active
   window.__huddleNet77PlayerOpen = () => Array.from(document.querySelectorAll('#player, .player-iframe'))
@@ -53,6 +55,14 @@
     }
     active = current
     const reading = active?.frame ? frameStates.get(active.frame).media : media.state(active?.video, event)
+    if (catalogLaunch && active && !reading.paused && performance.now() - lastCatalogReport >= 1000) {
+      lastCatalogReport = performance.now()
+      chrome.runtime.sendMessage?.({
+        kind: 'movie-hub-media', ready: true, position: reading.position, duration: reading.duration,
+        paused: reading.paused, buffering: reading.buffering, seeking: reading.seeking,
+        netMirrorKey: active.key, netMirrorTitle: active.title,
+      })?.catch(() => undefined)
+    }
     window.postMessage({
       ...reading,
       channel: 'huddle', kind: 'state', at: performance.now(),
